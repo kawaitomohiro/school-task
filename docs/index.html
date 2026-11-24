@@ -1,0 +1,3052 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>スクールタスク</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="スクールタスク">
+<meta name="theme-color" content="#2563eb">
+<meta name="description" content="先生の校務タスクを管理するアプリ。URLを開くだけ・記録はこの端末だけ。">
+<style>
+.nav-item[data-screen="shared"], #screen-shared, .web-hide { display: none !important; }
+.web-note { font-size: 12px; color: #64748b; line-height: 1.6; }
+</style>
+<script>
+window.__WEB__ = true;
+window.FAKE_GAS_KEY = "school_task_web_v1";
+// fake_gas_local.js — GASのスプレッドシートを「この端末の localStorage」でまねる小さな偽物（2026-11-24）
+//   使い方（Web版の build で）：
+//     <script> FAKE_GAS_KEY='アプリごとのかぎ'; ＋このファイル ＋
+//       window.__API = (function(){ <Code.gs の中身> ; return { 関数名: 関数名, ... }; })();
+//       ＋ makeRun_(window.__API) で google.script.run を作る（script のとじタグを書かない）
+//   まねる物：SpreadsheetApp（シート・範囲の読み書き・行の追加と削除）、Utilities.formatDate、Logger、LockService
+//   書きこむたびに、全部のシートを localStorage に入れなおす（開き直しても残る）
+(function (G) {
+  var KEY = G.FAKE_GAS_KEY || 'fake_gas_sheets';
+  var store = {};
+  try { store = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { store = {}; }
+  function persist() { localStorage.setItem(KEY, JSON.stringify(store)); }
+  function rowsOf(name) { return store[name]; }
+  function Range(sheet, r, c, nr, nc) { this.s = sheet; this.r = r; this.c = c; this.nr = nr || 1; this.nc = nc || 1; }
+  Range.prototype.getValues = function () {
+    var R = rowsOf(this.s.name), out = [];
+    for (var i = 0; i < this.nr; i++) { var row = []; for (var j = 0; j < this.nc; j++) { var x = R[this.r - 1 + i]; var v = x && x[this.c - 1 + j]; row.push(v === undefined || v === null ? '' : v); } out.push(row); }
+    return out;
+  };
+  Range.prototype.getValue = function () { return this.getValues()[0][0]; };
+  Range.prototype.getDisplayValues = function () { return this.getValues().map(function (r) { return r.map(String); }); };
+  Range.prototype.setValues = function (v) {
+    var R = rowsOf(this.s.name);
+    for (var i = 0; i < this.nr; i++) { while (R.length < this.r + i) R.push([]); var row = R[this.r - 1 + i]; for (var j = 0; j < this.nc; j++) { while (row.length < this.c + j) row.push(''); row[this.c - 1 + j] = v[i][j]; } }
+    persist(); return this;
+  };
+  Range.prototype.setValue = function (v) { return this.setValues([[v]]); };
+  Range.prototype.clearContent = function () { var e = []; for (var i = 0; i < this.nr; i++) { var r = []; for (var j = 0; j < this.nc; j++) r.push(''); e.push(r); } return this.setValues(e); };
+  ['setNumberFormat', 'setFontWeight', 'setBackground', 'setFontColor', 'setHorizontalAlignment', 'setDataValidation', 'setWrap', 'protect', 'setFontSize'].forEach(function (k) { Range.prototype[k] = function () { return this; }; });
+  function Sheet(name) { this.name = name; }
+  Sheet.prototype.getName = function () { return this.name; };
+  Sheet.prototype.getLastRow = function () { var R = rowsOf(this.name); var n = R.length; while (n > 0 && R[n - 1].every(function (v) { return v === '' || v === null || v === undefined; })) n--; return n; };
+  Sheet.prototype.getLastColumn = function () { var m = 0; rowsOf(this.name).forEach(function (r) { m = Math.max(m, r.length); }); return m; };
+  Sheet.prototype.getMaxRows = function () { return Math.max(1000, rowsOf(this.name).length); };
+  Sheet.prototype.getRange = function (r, c, nr, nc) {
+    if (typeof r === 'string') { throw new Error('A1形式は未対応'); }
+    return new Range(this, r, c, nr, nc);
+  };
+  Sheet.prototype.getDataRange = function () { return new Range(this, 1, 1, Math.max(1, this.getLastRow()), Math.max(1, this.getLastColumn())); };
+  Sheet.prototype.appendRow = function (a) { var R = rowsOf(this.name); R.length = this.getLastRow(); R.push(a.slice()); persist(); return this; };
+  Sheet.prototype.deleteRow = function (r) { rowsOf(this.name).splice(r - 1, 1); persist(); };
+  Sheet.prototype.deleteRows = function (r, n) { rowsOf(this.name).splice(r - 1, n); persist(); };
+  Sheet.prototype.clear = function () { store[this.name] = []; persist(); return this; };
+  Sheet.prototype.clearContents = Sheet.prototype.clear;
+  ['setFrozenRows', 'setColumnWidth', 'autoResizeColumns', 'setTabColor', 'hideSheet', 'protect'].forEach(function (k) { Sheet.prototype[k] = function () { return this; }; });
+  var ss = {
+    getSheetByName: function (n) { return store[n] ? new Sheet(n) : null; },
+    insertSheet: function (n) { if (!store[n]) { store[n] = []; persist(); } return new Sheet(n); },
+    getSheets: function () { return Object.keys(store).map(function (n) { return new Sheet(n); }); },
+    getId: function () { return 'local'; }, getName: function () { return 'local'; }
+  };
+  G.SpreadsheetApp = { getActiveSpreadsheet: function () { return ss; }, flush: function () {} };
+  G.LockService = { getScriptLock: function () { return { waitLock: function () {}, tryLock: function () { return true; }, releaseLock: function () {} }; }, getDocumentLock: function () { return G.LockService.getScriptLock(); } };
+  function pad(n) { return ('0' + n).slice(-2); }
+  G.Utilities = {
+    formatDate: function (d, tz, f) {
+      d = new Date(d);
+      return String(f || 'yyyy-MM-dd').split('yyyy').join(d.getFullYear()).split('MM').join(pad(d.getMonth() + 1)).split('dd').join(pad(d.getDate()))
+        .split('HH').join(pad(d.getHours())).split('mm').join(pad(d.getMinutes())).split('ss').join(pad(d.getSeconds()))
+        .split('M').join(String(d.getMonth() + 1)).split('d').join(String(d.getDate()));
+    },
+    getUuid: function () { return 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10); },
+    sleep: function () {}
+  };
+  G.Logger = { log: function () {} };
+  // google.script.run をつくる（非同期・JSONで値を写す＝本物と同じく参照を共有しない）
+  G.makeRun_ = function (API, delay) {
+    function runner(ok, ng) {
+      var r = { withSuccessHandler: function (f) { return runner(f, ng); }, withFailureHandler: function (f) { return runner(ok, f); }, withUserObject: function () { return r; } };
+      Object.keys(API).forEach(function (k) {
+        r[k] = function () {
+          var args = JSON.parse(JSON.stringify([].slice.call(arguments)));
+          setTimeout(function () {
+            var v;
+            try { v = API[k].apply(null, args); v = v === undefined ? null : JSON.parse(JSON.stringify(v)); }
+            catch (e) { if (ng) ng(e); else console.warn(e); return; }
+            if (ok) ok(v);
+          }, delay || 60);
+        };
+      });
+      return r;
+    }
+    return { script: { run: runner(null, null) } };
+  };
+})(window);
+
+window.__API = (function(){
+// ============================================================
+// スクールタスク - 小学校教員専用タスク管理アプリ (Code.gs)
+// ============================================================
+
+// --- シート名の定数 ---
+var SHEET_USERS = 'ユーザー';
+var SHEET_TASKS = 'マイタスク';
+var SHEET_SHARED = '共有タスク';
+var SHEET_CUSTOM = 'カスタムマスター';
+
+// --- ウェブアプリの起動 ---
+function doGet() {
+  return HtmlService.createHtmlOutputFromFile('index')
+    .setTitle('スクールタスク')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+// --- シートの取得・自動作成 ---
+function getOrCreateSheet_(name, headers) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    sheet = ss.insertSheet(name);
+    if (headers && headers.length > 0) {
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      sheet.setFrozenRows(1);
+      sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
+    }
+  }
+  return sheet;
+}
+
+// --- 全シートの初期化 ---
+function initSheets_() {
+  getOrCreateSheet_(SHEET_USERS, ['userId', 'userName', 'password', 'createdAt']);
+  getOrCreateSheet_(SHEET_TASKS, [
+    'id', 'userId', 'taskName', 'category', 'subCategory',
+    'priority', 'deadline', 'memo', 'isCompleted', 'completedAt', 'createdAt'
+  ]);
+  getOrCreateSheet_(SHEET_SHARED, [
+    'id', 'taskName', 'category', 'subCategory', 'priority',
+    'deadline', 'memo', 'assignee', 'isCompleted', 'completedAt',
+    'completedBy', 'createdBy', 'createdAt'
+  ]);
+  getOrCreateSheet_(SHEET_CUSTOM, [
+    'id', 'taskName', 'category', 'subCategory', 'createdBy', 'createdAt'
+  ]);
+}
+
+// ============================================================
+// ユーザー管理
+// ============================================================
+
+function getUser(localId) {
+  initSheets_();
+  var sheet = getOrCreateSheet_(SHEET_USERS, ['userId', 'userName', 'password', 'createdAt']);
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][0] === localId) {
+      return { userId: data[i][0], userName: data[i][1], hasPassword: !!data[i][2] };
+    }
+  }
+  return null;
+}
+
+function createUser(localId, name) {
+  initSheets_();
+  var sheet = getOrCreateSheet_(SHEET_USERS, ['userId', 'userName', 'password', 'createdAt']);
+  sheet.appendRow([localId, name, '', new Date().toISOString()]);
+  return { userId: localId, userName: name };
+}
+
+function createUserWithPassword(localId, name, passcode) {
+  initSheets_();
+  var sheet = getOrCreateSheet_(SHEET_USERS, ['userId', 'userName', 'password', 'createdAt']);
+  sheet.appendRow([localId, name, '', new Date().toISOString()]);
+  // パスコードをテキスト形式で保存（0落ち防止）
+  var cell = sheet.getRange(sheet.getLastRow(), 3);
+  cell.setNumberFormat('@');
+  cell.setValue(String(passcode));
+  return { userId: localId, userName: name };
+}
+
+function checkNameExists(name) {
+  initSheets_();
+  var sheet = getOrCreateSheet_(SHEET_USERS, ['userId', 'userName', 'password', 'createdAt']);
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][1] === name) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function loginWithPassword(name, passcode) {
+  initSheets_();
+  var sheet = getOrCreateSheet_(SHEET_USERS, ['userId', 'userName', 'password', 'createdAt']);
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    // 文字列として比較（0落ち防止）
+    if (data[i][1] === name && String(data[i][2]) === String(passcode)) {
+      return { userId: data[i][0], userName: data[i][1] };
+    }
+  }
+  return null;
+}
+
+function setPassword(localId, passcode) {
+  var sheet = getOrCreateSheet_(SHEET_USERS, ['userId', 'userName', 'password', 'createdAt']);
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][0] === localId) {
+      // テキスト形式で保存（0落ち防止）
+      var cell = sheet.getRange(i + 1, 3);
+      cell.setNumberFormat('@');
+      cell.setValue(String(passcode));
+      return true;
+    }
+  }
+  return false;
+}
+
+function updateUserName(localId, newName) {
+  var sheet = getOrCreateSheet_(SHEET_USERS, ['userId', 'userName', 'password', 'createdAt']);
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][0] === localId) {
+      sheet.getRange(i + 1, 2).setValue(newName);
+      return true;
+    }
+  }
+  return false;
+}
+
+// ============================================================
+// マイタスク
+// ============================================================
+
+function loadMyTasks(localId) {
+  try {
+    initSheets_();
+    var headers = [
+      'id', 'userId', 'taskName', 'category', 'subCategory',
+      'priority', 'deadline', 'memo', 'isCompleted', 'completedAt', 'createdAt'
+    ];
+    var sheet = getOrCreateSheet_(SHEET_TASKS, headers);
+    var data = sheet.getDataRange().getValues();
+    var tasks = [];
+    var searchId = String(localId);
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][1]) === searchId) {
+        var deadlineVal = '';
+        try {
+          if (data[i][6]) {
+            var d = new Date(data[i][6]);
+            if (!isNaN(d.getTime())) {
+              deadlineVal = Utilities.formatDate(d, 'Asia/Tokyo', 'yyyy-MM-dd');
+            } else {
+              deadlineVal = String(data[i][6]);
+            }
+          }
+        } catch(e) {
+          deadlineVal = String(data[i][6] || '');
+        }
+        var completedAtVal = '';
+        try {
+          if (data[i][9]) {
+            var cd = new Date(data[i][9]);
+            completedAtVal = !isNaN(cd.getTime()) ? cd.toISOString() : String(data[i][9]);
+          }
+        } catch(e) {
+          completedAtVal = String(data[i][9] || '');
+        }
+        tasks.push({
+          id: String(data[i][0]),
+          taskName: String(data[i][2] || ''),
+          category: String(data[i][3] || ''),
+          subCategory: String(data[i][4] || ''),
+          priority: String(data[i][5] || '中'),
+          deadline: deadlineVal,
+          memo: String(data[i][7] || ''),
+          isCompleted: data[i][8] === true || data[i][8] === 'TRUE' || data[i][8] === true,
+          completedAt: completedAtVal,
+          createdAt: String(data[i][10] || '')
+        });
+      }
+    }
+    return JSON.stringify(tasks);
+  } catch(e) {
+    // エラーが起きても空配列ではなくエラー情報を返す
+    return JSON.stringify({ error: e.message, stack: e.stack });
+  }
+}
+
+// デバッグ用：保存テスト（1行書いて読み返す）
+function debugSaveTest(localId) {
+  try {
+    initSheets_();
+    var headers = [
+      'id', 'userId', 'taskName', 'category', 'subCategory',
+      'priority', 'deadline', 'memo', 'isCompleted', 'completedAt', 'createdAt'
+    ];
+    var sheet = getOrCreateSheet_(SHEET_TASKS, headers);
+    var testId = 'test_' + new Date().getTime();
+    sheet.appendRow([
+      testId, localId, 'テスト保存（削除OK）', 'テスト', '',
+      '中', '', '', false, '', new Date().toISOString()
+    ]);
+    SpreadsheetApp.flush();
+    // 書いた直後に読み返す
+    var data = sheet.getDataRange().getValues();
+    var found = false;
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]) === testId) { found = true; break; }
+    }
+    // テスト行を削除
+    if (found) {
+      for (var j = data.length - 1; j >= 1; j--) {
+        if (String(data[j][0]) === testId) { sheet.deleteRow(j + 1); break; }
+      }
+    }
+    return JSON.stringify({
+      success: true,
+      written: found,
+      userId: String(localId),
+      sheetName: sheet.getName(),
+      totalRows: data.length - 1
+    });
+  } catch(e) {
+    return JSON.stringify({ success: false, error: e.message });
+  }
+}
+
+// デバッグ用：問題の切り分けに使う（設定画面から呼び出せる）
+function debugLoadInfo(localId) {
+  try {
+    initSheets_();
+    var sheet = getOrCreateSheet_(SHEET_TASKS, [
+      'id', 'userId', 'taskName', 'category', 'subCategory',
+      'priority', 'deadline', 'memo', 'isCompleted', 'completedAt', 'createdAt'
+    ]);
+    var data = sheet.getDataRange().getValues();
+    var info = {
+      searchId: String(localId),
+      searchIdType: typeof localId,
+      totalRows: data.length - 1,
+      matchedRows: 0,
+      sampleUserIds: []
+    };
+    for (var i = 1; i < data.length; i++) {
+      if (info.sampleUserIds.length < 5) {
+        info.sampleUserIds.push({
+          raw: String(data[i][1]),
+          type: typeof data[i][1],
+          match: String(data[i][1]) === String(localId)
+        });
+      }
+      if (String(data[i][1]) === String(localId)) {
+        info.matchedRows++;
+      }
+    }
+    return JSON.stringify(info);
+  } catch(e) {
+    return JSON.stringify({ error: e.message });
+  }
+}
+
+function saveMyTasks(localId, tasksJson) {
+  try {
+    initSheets_();
+    var tasks = JSON.parse(tasksJson);
+    var headers = [
+      'id', 'userId', 'taskName', 'category', 'subCategory',
+      'priority', 'deadline', 'memo', 'isCompleted', 'completedAt', 'createdAt'
+    ];
+    var sheet = getOrCreateSheet_(SHEET_TASKS, headers);
+    var data = sheet.getDataRange().getValues();
+
+    // 下の行から順に、このユーザーの行を削除（文字列として比較）
+    var searchId = String(localId);
+    for (var i = data.length - 1; i >= 1; i--) {
+      if (String(data[i][1]) === searchId) {
+        sheet.deleteRow(i + 1);
+      }
+    }
+
+    // 新しいタスクを書き込み
+    for (var j = 0; j < tasks.length; j++) {
+      var t = tasks[j];
+      sheet.appendRow([
+        t.id, localId, t.taskName, t.category, t.subCategory || '',
+        t.priority || '中', t.deadline || '', t.memo || '',
+        t.isCompleted || false, t.completedAt || '', t.createdAt || new Date().toISOString()
+      ]);
+    }
+    return { success: true, saved: tasks.length };
+  } catch(e) {
+    throw new Error('保存失敗: ' + e.message);
+  }
+}
+
+// ============================================================
+// 共有タスク
+// ============================================================
+
+function loadSharedTasks() {
+  initSheets_();
+  var headers = [
+    'id', 'taskName', 'category', 'subCategory', 'priority',
+    'deadline', 'memo', 'assignee', 'isCompleted', 'completedAt',
+    'completedBy', 'createdBy', 'createdAt'
+  ];
+  var sheet = getOrCreateSheet_(SHEET_SHARED, headers);
+  var data = sheet.getDataRange().getValues();
+  var tasks = [];
+  for (var i = 1; i < data.length; i++) {
+    tasks.push({
+      id: data[i][0],
+      taskName: data[i][1],
+      category: data[i][2],
+      subCategory: data[i][3],
+      priority: data[i][4] || '中',
+      deadline: (function(){ try { if(data[i][5]){var d=new Date(data[i][5]);return !isNaN(d.getTime())?Utilities.formatDate(d,'Asia/Tokyo','yyyy-MM-dd'):String(data[i][5]);}return ''; }catch(e){return String(data[i][5]||'');} })(),
+      memo: data[i][6] || '',
+      assignee: data[i][7] || '',
+      isCompleted: data[i][8] === true || data[i][8] === 'TRUE',
+      completedAt: data[i][9] || '',
+      completedBy: data[i][10] || '',
+      createdBy: data[i][11] || '',
+      createdAt: data[i][12] || ''
+    });
+  }
+  return JSON.stringify(tasks);
+}
+
+function saveSharedTasks(tasksJson) {
+  var tasks = JSON.parse(tasksJson);
+  var headers = [
+    'id', 'taskName', 'category', 'subCategory', 'priority',
+    'deadline', 'memo', 'assignee', 'isCompleted', 'completedAt',
+    'completedBy', 'createdBy', 'createdAt'
+  ];
+  var sheet = getOrCreateSheet_(SHEET_SHARED, headers);
+
+  // 全データクリアして書き直し
+  var lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    sheet.deleteRows(2, lastRow - 1);
+  }
+
+  for (var j = 0; j < tasks.length; j++) {
+    var t = tasks[j];
+    sheet.appendRow([
+      t.id, t.taskName, t.category, t.subCategory || '',
+      t.priority || '中', t.deadline || '', t.memo || '',
+      t.assignee || '', t.isCompleted || false, t.completedAt || '',
+      t.completedBy || '', t.createdBy || '', t.createdAt || new Date().toISOString()
+    ]);
+  }
+  return true;
+}
+
+// ============================================================
+// カスタムマスター（ユーザーが追加したタスクテンプレート）
+// ============================================================
+
+function loadCustomMaster() {
+  initSheets_();
+  var headers = ['id', 'taskName', 'category', 'subCategory', 'createdBy', 'createdAt'];
+  var sheet = getOrCreateSheet_(SHEET_CUSTOM, headers);
+  var data = sheet.getDataRange().getValues();
+  var tasks = [];
+  for (var i = 1; i < data.length; i++) {
+    tasks.push({
+      id: data[i][0],
+      taskName: data[i][1],
+      category: data[i][2],
+      subCategory: data[i][3],
+      createdBy: data[i][4],
+      createdAt: data[i][5]
+    });
+  }
+  return JSON.stringify(tasks);
+}
+
+function addCustomMasterTask(taskJson) {
+  var task = JSON.parse(taskJson);
+  var headers = ['id', 'taskName', 'category', 'subCategory', 'createdBy', 'createdAt'];
+  var sheet = getOrCreateSheet_(SHEET_CUSTOM, headers);
+  sheet.appendRow([
+    task.id, task.taskName, task.category, task.subCategory || '',
+    task.createdBy || '', new Date().toISOString()
+  ]);
+  return true;
+}
+
+function deleteCustomMasterTask(taskId) {
+  var headers = ['id', 'taskName', 'category', 'subCategory', 'createdBy', 'createdAt'];
+  var sheet = getOrCreateSheet_(SHEET_CUSTOM, headers);
+  var data = sheet.getDataRange().getValues();
+  for (var i = data.length - 1; i >= 1; i--) {
+    if (data[i][0] === taskId) {
+      sheet.deleteRow(i + 1);
+      return true;
+    }
+  }
+  return false;
+}
+
+// ============================================================
+// リセット機能
+// ============================================================
+
+function resetMyTasks(localId) {
+  var headers = [
+    'id', 'userId', 'taskName', 'category', 'subCategory',
+    'priority', 'deadline', 'memo', 'isCompleted', 'completedAt', 'createdAt'
+  ];
+  var sheet = getOrCreateSheet_(SHEET_TASKS, headers);
+  var data = sheet.getDataRange().getValues();
+  for (var i = data.length - 1; i >= 1; i--) {
+    if (String(data[i][1]) === String(localId)) {
+      sheet.deleteRow(i + 1);
+    }
+  }
+  return true;
+}
+
+function resetSharedTasks() {
+  var headers = [
+    'id', 'taskName', 'category', 'subCategory', 'priority',
+    'deadline', 'memo', 'assignee', 'isCompleted', 'completedAt',
+    'completedBy', 'createdBy', 'createdAt'
+  ];
+  var sheet = getOrCreateSheet_(SHEET_SHARED, headers);
+  var lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    sheet.deleteRows(2, lastRow - 1);
+  }
+  return true;
+}
+
+// ============================================================
+// 全ユーザー名の取得（共有タスクの担当者選択用）
+// ============================================================
+
+function getAllUserNames() {
+  var sheet = getOrCreateSheet_(SHEET_USERS, ['userId', 'userName', 'password', 'createdAt']);
+  var data = sheet.getDataRange().getValues();
+  var names = [];
+  for (var i = 1; i < data.length; i++) {
+    names.push(data[i][1]);
+  }
+  return JSON.stringify(names);
+}
+
+return {getUser:getUser,createUser:createUser,createUserWithPassword:createUserWithPassword,checkNameExists:checkNameExists,loginWithPassword:loginWithPassword,setPassword:setPassword,updateUserName:updateUserName,loadMyTasks:loadMyTasks,debugSaveTest:debugSaveTest,debugLoadInfo:debugLoadInfo,saveMyTasks:saveMyTasks,loadSharedTasks:loadSharedTasks,saveSharedTasks:saveSharedTasks,loadCustomMaster:loadCustomMaster,addCustomMasterTask:addCustomMasterTask,deleteCustomMasterTask:deleteCustomMasterTask,resetMyTasks:resetMyTasks,resetSharedTasks:resetSharedTasks,getAllUserNames:getAllUserNames};
+})();
+window.google = makeRun_(window.__API, 80);
+</script>
+
+<style>
+/* ===== 基本リセット・共通 ===== */
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Hiragino Sans',sans-serif;background:#f0f4f8;color:#1a2a3a;font-size:14px;padding-bottom:24px;overflow-x:hidden;-webkit-text-size-adjust:100%;width:100%;max-width:100vw;}
+body.font-s{font-size:13px;}
+body.font-m{font-size:15px;}
+body.font-l{font-size:17px;}
+body.font-s .header h1{font-size:14px;}
+body.font-m .header h1{font-size:16px;}
+body.font-l .header h1{font-size:18px;}
+body.font-s .header-tabs .nav-item{font-size:9px;}
+body.font-m .header-tabs .nav-item{font-size:11px;}
+body.font-l .header-tabs .nav-item{font-size:12px;}
+body.font-s .card{padding:12px;}
+body.font-l .card{padding:18px;}
+body.font-s .task-card .task-name{font-size:12px;}
+body.font-m .task-card .task-name{font-size:14px;}
+body.font-l .task-card .task-name{font-size:16px;}
+a{color:#2563eb;text-decoration:none;}
+button{cursor:pointer;border:none;font-family:inherit;font-size:inherit;}
+input,select,textarea{font-family:inherit;font-size:14px;}
+
+/* ===== ヘッダー ===== */
+.header{position:sticky;top:0;z-index:100;background:linear-gradient(135deg,#1e40af,#2563eb,#3b82f6);border-bottom:none;box-shadow:0 2px 8px rgba(37,99,235,.3);}
+.header-top{padding:10px 16px;display:flex;align-items:center;justify-content:space-between;}
+.header .logo-area{display:flex;align-items:center;gap:10px;}
+.header .logo-icon{width:28px;height:28px;background:#fff;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:15px;box-shadow:0 2px 4px rgba(0,0,0,.1);}
+.header h1{font-size:15px;color:#fff;font-weight:800;letter-spacing:.5px;}
+.header .app-sub{font-size:8px;color:rgba(255,255,255,.75);font-weight:400;display:block;letter-spacing:.3px;}
+.header .user-name{font-size:11px;color:rgba(255,255,255,.85);background:rgba(255,255,255,.15);padding:4px 10px;border-radius:12px;}
+
+/* ===== ヘッダー内タブ ===== */
+.header-tabs{display:flex;padding:0 8px 0;}
+.header-tabs .nav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:rgba(255,255,255,.55);font-size:10px;font-weight:600;gap:1px;padding:6px 0 8px;cursor:pointer;transition:all .2s;border-bottom:3px solid transparent;position:relative;}
+.header-tabs .nav-item.active{color:#fff;border-bottom-color:#fff;}
+.header-tabs .nav-item svg{width:20px;height:20px;}
+
+/* ===== 画面共通 ===== */
+.screen{display:none;padding:12px 16px 24px;}
+.screen.active{display:block;}
+
+/* ===== カード ===== */
+.card{background:#fff;border-radius:12px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,.06);}
+.card h2{font-size:15px;color:#1e40af;margin-bottom:8px;}
+
+/* ===== 進捗バー ===== */
+.progress-wrap{margin:4px 0 8px;}
+.progress-bar{height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;}
+.progress-fill{height:100%;background:linear-gradient(90deg,#3b82f6,#2563eb);border-radius:3px;transition:width .3s;}
+.progress-text{font-size:11px;color:#64748b;margin-top:2px;}
+
+/* ===== チェックリスト ===== */
+.task-item{display:flex;align-items:flex-start;padding:10px 0;border-bottom:1px solid #f1f5f9;gap:10px;}
+.task-item:last-child{border-bottom:none;}
+.task-check{width:22px;height:22px;border:2px solid #cbd5e1;border-radius:6px;flex-shrink:0;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;margin-top:1px;}
+.task-check.checked{background:#2563eb;border-color:#2563eb;}
+.task-check.checked::after{content:'';display:block;width:6px;height:10px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg);margin-top:-2px;}
+.task-info{flex:1;min-width:0;}
+.task-name{font-size:14px;color:#1e293b;line-height:1.4;}
+.task-name.completed{text-decoration:line-through;color:#94a3b8;}
+.task-meta{display:flex;gap:6px;margin-top:4px;flex-wrap:wrap;}
+.task-tag{font-size:10px;padding:2px 6px;border-radius:4px;background:#eff6ff;color:#3b82f6;}
+.task-tag.high{background:#fef2f2;color:#dc2626;}
+.task-tag.low{background:#f0fdf4;color:#16a34a;}
+.task-tag.deadline{background:#fffbeb;color:#d97706;}
+.task-memo-btn{font-size:11px;color:#64748b;cursor:pointer;padding:2px 4px;}
+.task-memo-area{margin-top:6px;width:100%;padding:6px 8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;resize:vertical;min-height:36px;}
+
+/* ===== タブ ===== */
+.tabs{display:flex;overflow-x:auto;gap:4px;padding:4px 0 12px;-webkit-overflow-scrolling:touch;}
+.tabs::-webkit-scrollbar{display:none;}
+.tab-btn{white-space:nowrap;padding:8px 14px;border-radius:20px;background:#e2e8f0;color:#475569;font-size:12px;font-weight:600;transition:all .2s;flex-shrink:0;}
+.tab-btn.active{background:#2563eb;color:#fff;}
+
+/* ===== タスク選択リスト ===== */
+.select-group{margin-bottom:16px;}
+.select-group-header{display:flex;align-items:center;justify-content:space-between;padding:8px 0;cursor:pointer;}
+.select-group-title{font-size:14px;font-weight:600;color:#334155;}
+.select-all-btn{font-size:11px;color:#2563eb;padding:4px 10px;border-radius:12px;background:#eff6ff;}
+.select-item{display:flex;align-items:center;padding:8px 0;gap:10px;border-bottom:1px solid #f8fafc;}
+.select-box{width:20px;height:20px;border:2px solid #cbd5e1;border-radius:4px;flex-shrink:0;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;}
+.select-box.checked{background:#2563eb;border-color:#2563eb;}
+.select-box.checked::after{content:'';display:block;width:5px;height:9px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg);margin-top:-2px;}
+.select-label{font-size:13px;color:#334155;cursor:pointer;}
+
+/* ===== 行事サブメニュー ===== */
+.event-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:16px;}
+.event-card{background:#fff;border:2px solid #e2e8f0;border-radius:10px;padding:12px;text-align:center;cursor:pointer;transition:all .2s;font-size:13px;font-weight:600;color:#334155;}
+.event-card:hover,.event-card.active{border-color:#2563eb;background:#eff6ff;color:#2563eb;}
+.back-btn{display:inline-flex;align-items:center;gap:4px;color:#2563eb;font-size:13px;margin-bottom:12px;cursor:pointer;}
+
+/* ===== ボタン ===== */
+.btn{padding:10px 20px;border-radius:8px;font-weight:600;font-size:14px;transition:all .2s;}
+.btn-primary{background:#2563eb;color:#fff;}
+.btn-primary:hover{background:#1d4ed8;}
+.btn-danger{background:#dc2626;color:#fff;}
+.btn-danger:hover{background:#b91c1c;}
+.btn-outline{background:#fff;color:#2563eb;border:1px solid #2563eb;}
+.btn-block{width:100%;display:block;text-align:center;}
+
+/* ===== 保存ボタン（フローティング） ===== */
+.save-bar{position:fixed;top:0;left:0;right:0;z-index:200;background:linear-gradient(90deg,#f59e0b,#d97706);color:#fff;text-align:center;padding:10px 0;font-weight:700;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,.25);display:none;cursor:pointer;transition:all .2s;letter-spacing:.5px;}
+.save-bar.show{display:block;}
+.save-bar.saving{background:linear-gradient(90deg,#94a3b8,#94a3b8);pointer-events:none;}
+@media(min-width:640px){.save-bar{max-width:640px;left:50%;transform:translateX(-50%);border-radius:0 0 8px 8px;}}
+
+/* ===== クイック追加ボタン ===== */
+.quick-add{position:fixed;bottom:24px;right:16px;z-index:90;width:48px;height:48px;border-radius:50%;background:#2563eb;color:#fff;font-size:28px;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(37,99,235,.4);}
+
+/* ===== フィルターバー ===== */
+.filter-bar{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;}
+.filter-btn{padding:6px 12px;border-radius:16px;font-size:11px;font-weight:600;background:#e2e8f0;color:#475569;transition:all .2s;}
+.filter-btn.active{background:#2563eb;color:#fff;}
+
+/* ===== おすすめ ===== */
+.recommend-banner{background:linear-gradient(135deg,#eff6ff,#dbeafe);border:1px solid #bfdbfe;border-radius:12px;padding:12px 16px;margin-bottom:12px;}
+.recommend-banner h3{font-size:13px;color:#1e40af;margin-bottom:6px;}
+.recommend-tag{display:inline-block;font-size:11px;padding:4px 8px;margin:2px;background:#fff;border-radius:12px;color:#2563eb;cursor:pointer;border:1px solid #bfdbfe;}
+
+/* ===== モーダル ===== */
+.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:200;display:none;align-items:center;justify-content:center;padding:12px;overflow-y:auto;}
+.modal-overlay.show{display:flex;}
+.modal{background:#fff;border-radius:16px;padding:24px;width:100%;max-width:400px;max-height:80vh;overflow-y:auto;}
+.modal h2{font-size:18px;color:#1e40af;margin-bottom:16px;}
+.modal input,.modal select,.modal textarea{width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:12px;}
+.modal textarea{min-height:60px;resize:vertical;}
+.modal-actions{display:flex;gap:8px;margin-top:8px;}
+.modal-actions .btn{flex:1;}
+
+/* ===== 設定画面 ===== */
+.setting-item{display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid #f1f5f9;}
+.setting-label{font-size:14px;color:#334155;}
+
+/* ===== ローディング ===== */
+.loading{text-align:center;padding:40px;color:#94a3b8;}
+.spinner{width:32px;height:32px;border:3px solid #e2e8f0;border-top-color:#2563eb;border-radius:50%;animation:spin .6s linear infinite;margin:0 auto 12px;}
+@keyframes spin{to{transform:rotate(360deg);}}
+
+/* ===== トースト ===== */
+.toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;z-index:300;display:none;animation:fadeIn .3s;}
+.toast.show{display:block;}
+@keyframes fadeIn{from{opacity:0;transform:translateX(-50%) translateY(-10px);}to{opacity:1;transform:translateX(-50%) translateY(0);}}
+
+/* ===== パスコード入力 ===== */
+.pin-display{display:flex;justify-content:center;gap:10px;margin-bottom:16px;}
+.pin-box{width:44px;height:52px;border:2px solid #cbd5e1;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:#1e40af;background:#fff;transition:border-color .2s;}
+.pin-box.filled{border-color:#2563eb;background:#eff6ff;}
+.pin-box.active{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.2);}
+.numpad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-width:240px;margin:0 auto;}
+.numpad-btn{height:48px;border-radius:10px;background:#f1f5f9;color:#1e40af;font-size:20px;font-weight:700;cursor:pointer;transition:all .15s;border:none;display:flex;align-items:center;justify-content:center;}
+.numpad-btn:active{background:#dbeafe;transform:scale(.95);}
+.numpad-btn.del{font-size:14px;color:#64748b;font-weight:600;}
+.numpad-btn.empty{visibility:hidden;}
+
+/* ===== 空状態 ===== */
+.empty-state{text-align:center;padding:40px 20px;color:#94a3b8;}
+.empty-state p{font-size:14px;margin-bottom:12px;}
+
+/* ===== レスポンシブ ===== */
+/* ===== スマホ対応 ===== */
+@media(max-width:380px){
+  .header-top{padding:8px 10px;}
+  .header .logo-icon{width:24px;height:24px;font-size:13px;}
+  .header h1{font-size:13px;}
+  .header .user-name{font-size:10px;padding:3px 7px;}
+  .header-tabs .nav-item{font-size:9px;padding:5px 0 6px;}
+  .header-tabs .nav-item svg{width:17px;height:17px;}
+  .screen{padding:10px 10px 20px;}
+  .card{padding:12px;border-radius:10px;}
+  .filter-btn{padding:5px 8px;font-size:10px;}
+  .event-list{grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:6px;}
+  .event-card{padding:10px;font-size:12px;}
+  .modal{padding:16px;margin:0 8px;}
+  .tab-btn{padding:6px 10px;font-size:11px;}
+}
+@media(min-width:640px){
+  body{max-width:640px;margin:0 auto;}
+}
+</style>
+</head>
+<body>
+
+<!-- ===== ローディング画面 ===== -->
+<div id="loadingScreen" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;background:linear-gradient(135deg,#1e40af,#2563eb,#3b82f6);">
+  <div style="font-size:48px;margin-bottom:12px;">&#x1F3EB;</div>
+  <div style="font-size:24px;font-weight:800;color:#fff;letter-spacing:1px;margin-bottom:4px;">スクールタスク</div>
+  <div style="font-size:12px;color:rgba(255,255,255,.7);margin-bottom:24px;">小学校教員専用タスク管理</div>
+  <div class="loading" style="color:rgba(255,255,255,.8);"><div class="spinner" style="border-color:rgba(255,255,255,.3);border-top-color:#fff;"></div>読み込み中...</div>
+</div>
+
+<!-- ===== ログイン／新規登録モーダル ===== -->
+<div id="nameModal" class="modal-overlay">
+  <div class="modal">
+    <div style="text-align:center;margin-bottom:8px;font-size:36px;">&#x1F3EB;</div>
+    <h2 style="text-align:center;">スクールタスク</h2>
+
+    <!-- メイン：ログイン画面（毎回表示） -->
+    <div id="loginForm">
+      <p style="margin-bottom:12px;color:#64748b;font-size:13px;text-align:center;">名前と4桁パスコードを入力してください</p>
+      <input type="text" id="loginName" placeholder="名前" style="margin-bottom:12px;">
+      <p style="font-size:12px;color:#64748b;text-align:center;margin-bottom:8px;">パスコード（4桁）</p>
+      <div class="pin-display" id="pinDisplayLogin">
+        <div class="pin-box active"></div><div class="pin-box"></div><div class="pin-box"></div><div class="pin-box"></div>
+      </div>
+      <div class="numpad" id="numpadLogin"></div>
+      <div id="loginMsg" style="font-size:11px;color:#dc2626;margin:8px 0;min-height:16px;text-align:center;"></div>
+      <button class="btn btn-primary btn-block" style="margin-bottom:10px;padding:14px;" onclick="submitLogin()">ログイン</button>
+      <hr style="border:none;border-top:1px solid #e2e8f0;margin:16px 0;">
+      <p style="font-size:12px;color:#64748b;text-align:center;">はじめて使う方</p>
+      <button class="btn btn-outline btn-block" style="margin-top:8px;padding:12px;" onclick="showRegisterForm()">新規登録はこちら</button>
+    </div>
+
+    <!-- 新規登録画面 -->
+    <div id="registerForm" style="display:none;">
+      <p style="margin-bottom:8px;color:#64748b;font-size:13px;text-align:center;">名前と4桁パスコードを設定してください</p>
+      <p style="margin-bottom:12px;color:#d97706;font-size:11px;text-align:center;">次回からこの名前とパスコードでログインします</p>
+      <input type="text" id="nameInputMulti" placeholder="名前（例：山田太郎）" style="margin-bottom:12px;">
+      <p style="font-size:12px;color:#64748b;text-align:center;margin-bottom:8px;">4桁のパスコードを入力</p>
+      <div class="pin-display" id="pinDisplayMulti">
+        <div class="pin-box active"></div><div class="pin-box"></div><div class="pin-box"></div><div class="pin-box"></div>
+      </div>
+      <div class="numpad" id="numpadMulti"></div>
+      <div id="nameCheckMsg" style="font-size:11px;margin:8px 0;min-height:16px;text-align:center;"></div>
+      <div class="btn-row" style="display:flex;gap:8px;margin-top:8px;">
+        <button class="btn btn-outline" style="flex:1;" onclick="showLoginFormFromRegister()">戻る</button>
+        <button class="btn btn-primary" style="flex:1;" onclick="submitNameMulti()">登録してはじめる</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===== メインアプリ ===== -->
+<div id="app" style="display:none;">
+
+  <!-- ヘッダー -->
+  <div class="header">
+    <div class="header-top">
+      <div class="logo-area">
+        <div class="logo-icon">&#x1F3EB;</div>
+        <h1>スクールタスク<span class="app-sub">小学校教員専用タスク管理</span></h1>
+      </div>
+      <span class="user-name" id="headerUserName"></span>
+    </div>
+    <div class="header-tabs">
+      <div class="nav-item active" data-screen="mytasks" onclick="switchScreen('mytasks')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+        <span>マイタスク</span>
+      </div>
+      <div class="nav-item" data-screen="addtask" onclick="switchScreen('addtask')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        <span>タスク追加</span>
+      </div>
+      <div class="nav-item" data-screen="shared" onclick="switchScreen('shared')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+        <span>共有</span>
+      </div>
+      <div class="nav-item" data-screen="settings" onclick="switchScreen('settings')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        <span>設定</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 画面1: マイタスク ===== -->
+  <div id="screen-mytasks" class="screen active">
+    <!-- おすすめバナー -->
+    <div id="recommendBanner" class="recommend-banner" style="display:none;">
+      <h3>今月のおすすめタスク</h3>
+      <div id="recommendTags"></div>
+    </div>
+
+    <!-- フィルター -->
+    <div class="filter-bar">
+      <button class="filter-btn active" data-filter="all" onclick="setFilter('all')">すべて</button>
+      <button class="filter-btn" data-filter="today" onclick="setFilter('today')">今日やること</button>
+      <button class="filter-btn" data-filter="incomplete" onclick="setFilter('incomplete')">未完了のみ</button>
+    </div>
+
+    <!-- 並び替え -->
+    <div style="display:flex;justify-content:flex-end;margin-bottom:8px;gap:4px;">
+      <select id="sortSelect" onchange="sortTasks()" style="font-size:11px;padding:4px 8px;border:1px solid #e2e8f0;border-radius:6px;color:#64748b;">
+        <option value="category">カテゴリ順</option>
+        <option value="priority">優先度順</option>
+        <option value="deadline">期限順</option>
+      </select>
+    </div>
+
+    <!-- タスク一覧 -->
+    <div id="myTaskList"></div>
+
+    <!-- 空状態 -->
+    <div id="emptyState" class="empty-state" style="display:none;">
+      <p>まだタスクがありません</p>
+      <button class="btn btn-primary" onclick="switchScreen('addtask')">タスクを追加する</button>
+    </div>
+  </div>
+
+  <!-- ===== 画面2: タスク追加 ===== -->
+  <div id="screen-addtask" class="screen">
+    <!-- タブ -->
+    <div class="tabs" id="addTabs"></div>
+
+    <!-- タブ内容 -->
+    <div id="addContent"></div>
+
+    <!-- 追加ボタン -->
+    <div style="padding:12px 0;">
+      <button class="btn btn-primary btn-block" onclick="addSelectedToMyTasks()">マイタスクに追加</button>
+    </div>
+  </div>
+
+  <!-- ===== 画面3: 共有タスク ===== -->
+  <div id="screen-shared" class="screen">
+    <!-- 一覧 / 追加の切り替え -->
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+      <button id="sharedModeList" class="btn btn-primary" style="flex:1;font-size:13px;" onclick="switchSharedMode('list')">一覧</button>
+      <button id="sharedModeAdd" class="btn btn-outline" style="flex:1;font-size:13px;" onclick="switchSharedMode('add')">＋ タスクを選んで追加</button>
+    </div>
+
+    <!-- 一覧モード -->
+    <div id="sharedListMode">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <h2 style="font-size:16px;color:#1e40af;">共有タスク</h2>
+        <button class="btn btn-outline" style="font-size:12px;padding:6px 12px;" onclick="showAddSharedModal()">＋ 手入力で追加</button>
+      </div>
+      <div id="sharedTaskList"></div>
+      <div id="sharedEmpty" class="empty-state" style="display:none;">
+        <p>共有タスクはまだありません</p>
+      </div>
+    </div>
+
+    <!-- 追加モード（タブ選択式） -->
+    <div id="sharedAddMode" style="display:none;">
+      <div class="tabs" id="sharedAddTabs"></div>
+      <div id="sharedAddContent"></div>
+      <div style="padding:12px 0;">
+        <button class="btn btn-primary btn-block" onclick="addSelectedToSharedTasks()">共有タスクに追加</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 画面4: 設定 ===== -->
+  <div id="screen-settings" class="screen">
+    <div class="card">
+      <h2>ユーザー設定</h2>
+      <div class="setting-item">
+        <span class="setting-label">名前</span>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="text" id="settingsName" style="width:120px;padding:6px 8px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;">
+          <button class="btn btn-primary" style="padding:6px 12px;font-size:12px;" onclick="changeName()">変更</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" id="passwordSettingCard">
+      <h2>パスコード変更</h2>
+      <p style="font-size:12px;color:#64748b;margin-bottom:12px;">新しい4桁パスコードを入力してください</p>
+      <div class="pin-display" id="pinDisplaySettings">
+        <div class="pin-box active"></div><div class="pin-box"></div><div class="pin-box"></div><div class="pin-box"></div>
+      </div>
+      <div class="numpad" id="numpadSettings"></div>
+      <button class="btn btn-primary btn-block" style="font-size:13px;margin-top:12px;" onclick="savePassword()">パスコードを変更する</button>
+    </div>
+
+    <div class="card">
+      <h2>表示設定</h2>
+      <div class="setting-item">
+        <span class="setting-label">文字サイズ</span>
+        <div style="display:flex;gap:6px;">
+          <button class="btn font-size-btn" data-size="s" onclick="setFontSize('s')" style="padding:6px 12px;font-size:12px;">小</button>
+          <button class="btn font-size-btn" data-size="m" onclick="setFontSize('m')" style="padding:6px 12px;font-size:14px;">中</button>
+          <button class="btn font-size-btn" data-size="l" onclick="setFontSize('l')" style="padding:6px 12px;font-size:16px;">大</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>タスクマスター編集</h2>
+      <p style="font-size:12px;color:#64748b;margin-bottom:12px;">オリジナルのタスク候補を追加・削除できます</p>
+      <button class="btn btn-outline btn-block" style="margin-bottom:8px;" onclick="showCustomMasterModal()">カスタムタスクを追加</button>
+      <div id="customMasterList"></div>
+    </div>
+
+    <div class="card">
+      <h2>Web版について</h2>
+      <p class="web-note">タスクは この端末だけに保存されます（ほかの端末やサーバーには送りません）。<br>先生どうしの「共有タスク」はGoogle版で使えます。</p>
+    </div>
+
+    <div class="card">
+      <h2>データ管理</h2>
+      <div class="setting-item">
+        <span class="setting-label">マイタスクをリセット</span>
+        <button class="btn btn-danger" style="padding:6px 12px;font-size:12px;" onclick="resetMyTasksAction()">リセット</button>
+      </div>
+      <div class="setting-item web-hide">
+        <span class="setting-label">共有タスクをリセット</span>
+        <button class="btn btn-danger" style="padding:6px 12px;font-size:12px;" onclick="resetSharedTasksAction()">リセット</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>トラブルシューティング</h2>
+      <p style="font-size:11px;color:#64748b;margin-bottom:8px;">問題が起きた場合にご利用ください</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+        <button class="btn" style="padding:6px 12px;font-size:12px;background:#64748b;color:#fff;" onclick="runDebugCheck()">接続チェック</button>
+        <button class="btn" style="padding:6px 12px;font-size:12px;background:#d97706;color:#fff;" onclick="runSaveTest()">保存テスト</button>
+        <button class="btn" style="padding:6px 12px;font-size:12px;background:#2563eb;color:#fff;" onclick="forceManualSave()">強制保存</button>
+      </div>
+      <div id="debugResult" style="margin-top:8px;font-size:11px;color:#334155;white-space:pre-wrap;display:none;background:#f8fafc;padding:8px;border-radius:6px;"></div>
+    </div>
+  </div>
+
+  <!-- 保存バー（ヘッダー下固定） -->
+  <div id="saveFloat" class="save-bar" onclick="saveAll()">⚠ 未保存の変更があります ― タップして保存</div>
+
+  <!-- クイック追加ボタン -->
+  <button class="quick-add" onclick="showQuickAddModal()">+</button>
+
+</div>
+
+<!-- ===== タスク詳細モーダル ===== -->
+<div id="taskDetailModal" class="modal-overlay">
+  <div class="modal">
+    <h2 id="detailTitle">タスク詳細</h2>
+    <label style="font-size:12px;color:#64748b;">優先度</label>
+    <select id="detailPriority">
+      <option value="高">高</option>
+      <option value="中" selected>中</option>
+      <option value="低">低</option>
+    </select>
+    <label style="font-size:12px;color:#64748b;">期限日</label>
+    <input type="date" id="detailDeadline">
+    <label style="font-size:12px;color:#64748b;">メモ</label>
+    <textarea id="detailMemo" placeholder="メモを入力..."></textarea>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal('taskDetailModal')">キャンセル</button>
+      <button class="btn btn-primary" onclick="saveTaskDetail()">保存</button>
+    </div>
+    <div style="margin-top:12px;text-align:center;">
+      <button style="color:#dc2626;font-size:12px;background:none;" onclick="deleteTask()">このタスクを削除</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== クイック追加モーダル ===== -->
+<div id="quickAddModal" class="modal-overlay">
+  <div class="modal">
+    <h2>タスクを追加</h2>
+    <input type="text" id="quickTaskName" placeholder="タスク名を入力">
+    <label style="font-size:12px;color:#64748b;">カテゴリ</label>
+    <select id="quickCategory">
+      <option value="その他">その他</option>
+      <option value="毎日">毎日</option>
+      <option value="毎週">毎週</option>
+      <option value="毎月">毎月</option>
+      <option value="行事">行事</option>
+      <option value="校務分掌">校務分掌</option>
+    </select>
+    <label style="font-size:12px;color:#64748b;">優先度</label>
+    <select id="quickPriority">
+      <option value="中" selected>中</option>
+      <option value="高">高</option>
+      <option value="低">低</option>
+    </select>
+    <label style="font-size:12px;color:#64748b;">期限日（任意）</label>
+    <input type="date" id="quickDeadline">
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal('quickAddModal')">キャンセル</button>
+      <button class="btn btn-primary" onclick="quickAdd()">追加</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 共有タスク追加モーダル ===== -->
+<div id="sharedAddModal" class="modal-overlay">
+  <div class="modal">
+    <h2>共有タスクを追加</h2>
+    <input type="text" id="sharedTaskName" placeholder="タスク名">
+    <label style="font-size:12px;color:#64748b;">カテゴリ</label>
+    <select id="sharedCategory">
+      <option value="行事">行事</option>
+      <option value="校務分掌">校務分掌</option>
+      <option value="学年">学年</option>
+      <option value="その他">その他</option>
+    </select>
+    <label style="font-size:12px;color:#64748b;">担当者（任意）</label>
+    <input type="text" id="sharedAssignee" placeholder="担当者名">
+    <label style="font-size:12px;color:#64748b;">期限日（任意）</label>
+    <input type="date" id="sharedDeadline">
+    <label style="font-size:12px;color:#64748b;">メモ（任意）</label>
+    <textarea id="sharedMemo" placeholder="メモ"></textarea>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal('sharedAddModal')">キャンセル</button>
+      <button class="btn btn-primary" onclick="addSharedTask()">追加</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== カスタムマスター追加モーダル ===== -->
+<div id="customMasterModal" class="modal-overlay">
+  <div class="modal">
+    <h2>カスタムタスクを追加</h2>
+    <input type="text" id="cmTaskName" placeholder="タスク名">
+    <label style="font-size:12px;color:#64748b;">カテゴリ</label>
+    <select id="cmCategory">
+      <option value="毎日">毎日</option>
+      <option value="毎週">毎週</option>
+      <option value="毎月">毎月</option>
+      <option value="学期末">学期末</option>
+      <option value="年度初め">年度初め</option>
+      <option value="年度末">年度末</option>
+      <option value="行事">行事</option>
+      <option value="校務分掌">校務分掌</option>
+      <option value="研修">研修</option>
+    </select>
+    <label style="font-size:12px;color:#64748b;">サブカテゴリ（行事名など、任意）</label>
+    <input type="text" id="cmSubCategory" placeholder="例：運動会">
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal('customMasterModal')">キャンセル</button>
+      <button class="btn btn-primary" onclick="addCustomMaster()">追加</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== トースト ===== -->
+<div id="toast" class="toast"></div>
+
+<script>
+// ============================================================
+// タスクマスターデータ（コード埋め込みで高速化）
+// ============================================================
+var TASK_MASTER = {
+  "毎日": [
+    {id:"d01",name:"出欠確認・入力"},
+    {id:"d02",name:"朝の会の実施"},
+    {id:"d03",name:"帰りの会の実施"},
+    {id:"d04",name:"連絡帳のチェック・返信"},
+    {id:"d05",name:"宿題の丸付け・返却"},
+    {id:"d06",name:"提出物の確認・未提出者への声かけ"},
+    {id:"d07",name:"給食指導（配膳・片付け・アレルギー確認）"},
+    {id:"d08",name:"掃除の見回り・指導"},
+    {id:"d09",name:"翌日の授業準備・板書計画"},
+    {id:"d10",name:"教材・プリントの印刷"},
+    {id:"d11",name:"日誌・学級日誌の記入"},
+    {id:"d12",name:"児童の気になる行動・様子の記録"},
+    {id:"d13",name:"欠席児童の保護者への連絡"},
+    {id:"d14",name:"職員朝会・打ち合わせへの参加"},
+    {id:"d15",name:"登下校の見守り・安全確認"},
+    {id:"d16",name:"教室の簡単な整頓・環境確認"},
+    {id:"d17",name:"タブレット端末の充電確認"}
+  ],
+  "毎週": [
+    {id:"w01",name:"週案（週間指導計画）の作成・提出"},
+    {id:"w02",name:"1週間分の教材研究・授業準備"},
+    {id:"w03",name:"テスト・小テストの作成"},
+    {id:"w04",name:"テストの採点・成績入力"},
+    {id:"w05",name:"学年会への参加"},
+    {id:"w06",name:"委員会活動の指導"},
+    {id:"w07",name:"クラブ活動の準備・指導"},
+    {id:"w08",name:"縦割り班活動の計画・実施"},
+    {id:"w09",name:"特別教室の使用準備・片付け"},
+    {id:"w10",name:"児童との教育相談・面談"},
+    {id:"w11",name:"不登校児童への対応・家庭連絡"},
+    {id:"w12",name:"掲示物の確認・更新"},
+    {id:"w13",name:"登校班の確認・指導"}
+  ],
+  "毎月": [
+    {id:"m01",name:"学級通信（おたより）の作成"},
+    {id:"m02",name:"学年便りの作成"},
+    {id:"m03",name:"生活目標の設定・掲示"},
+    {id:"m04",name:"保健目標の掲示"},
+    {id:"m05",name:"教室の安全点検（月次）"},
+    {id:"m06",name:"校内安全点検"},
+    {id:"m07",name:"席替え・班替え"},
+    {id:"m08",name:"当番表・係の見直し"},
+    {id:"m09",name:"備品・消耗品の在庫確認・発注"},
+    {id:"m10",name:"集金袋の回収・確認"},
+    {id:"m11",name:"いじめアンケートの実施・集計"},
+    {id:"m12",name:"スクールカウンセラーとの連携"},
+    {id:"m13",name:"職員会議の資料準備・参加"},
+    {id:"m14",name:"校内研修への参加"},
+    {id:"m15",name:"学校だよりの原稿作成"},
+    {id:"m16",name:"学校ホームページの更新"},
+    {id:"m17",name:"避難訓練の事前指導・実施"},
+    {id:"m18",name:"デジタル連絡ツールでの配信"},
+    {id:"m19",name:"校務システムへのデータ入力"},
+    {id:"m20",name:"出席簿の印刷"},
+    {id:"m21",name:"出席簿の押印"}
+  ],
+  "学期末": [
+    {id:"t01",name:"通知表の所見書き（全体）"},
+    {id:"t02",name:"通知表の所見書き（総合的な学習）"},
+    {id:"t03",name:"通知表の所見書き（外国語）"},
+    {id:"t04",name:"通知表の所見書き（道徳）"},
+    {id:"t05",name:"成績付け（各教科の評定）"},
+    {id:"t06",name:"出欠の記録の入力"},
+    {id:"t07",name:"特別活動の記録"},
+    {id:"t08",name:"行動の記録の入力"},
+    {id:"t09",name:"授業時数の入力"},
+    {id:"t10",name:"学級会計の報告書作成"},
+    {id:"t11",name:"会計帳簿の整理・領収書の確認"},
+    {id:"t12",name:"保護者会の資料作成"},
+    {id:"t13",name:"保護者会の実施"},
+    {id:"t14",name:"長期休みの宿題・課題の準備"},
+    {id:"t15",name:"教室の大掃除"},
+    {id:"t16",name:"校内整備"},
+    {id:"t17",name:"指導記録のまとめ"},
+    {id:"t18",name:"次学期の教材の注文"},
+    {id:"t19",name:"次学期の出席簿の準備"},
+    {id:"t20",name:"次学期の時間割の作成・確認"},
+    {id:"t21",name:"次学期の座席表の作成"},
+    {id:"t22",name:"次学期の当番表・係表の作成"},
+    {id:"t23",name:"次学期の行事予定の確認"},
+    {id:"t24",name:"次学期の学習計画の作成"},
+    {id:"t25",name:"教材・教具の棚卸し・整理"},
+    {id:"t26",name:"児童の学習進度の確認・引き継ぎ準備"}
+  ],
+  "年度初め": [
+    {id:"y01",name:"指導要録・健康調査票の確認"},
+    {id:"y02",name:"個別の教育支援計画の確認"},
+    {id:"y03",name:"児童の引き継ぎ情報の確認"},
+    {id:"y04",name:"座席表の作成"},
+    {id:"y05",name:"給食当番表の作成"},
+    {id:"y06",name:"掃除当番表の作成"},
+    {id:"y07",name:"ネーム磁石の準備"},
+    {id:"y08",name:"名前シールの準備"},
+    {id:"y09",name:"教室整備（机椅子の配置）"},
+    {id:"y10",name:"教室の掲示物作成"},
+    {id:"y11",name:"教室の安全点検"},
+    {id:"y12",name:"時間割表の作成"},
+    {id:"y13",name:"年間指導計画の作成"},
+    {id:"y14",name:"学級経営案の作成"},
+    {id:"y15",name:"教育課程・週時程表の確認"},
+    {id:"y16",name:"学級開きの準備"},
+    {id:"y17",name:"朝の会・帰りの会の内容検討"},
+    {id:"y18",name:"自己紹介の準備"},
+    {id:"y19",name:"テスト点数記録表の作成"},
+    {id:"y20",name:"学級通信（第1号）の発行"},
+    {id:"y21",name:"緊急連絡網の作成"},
+    {id:"y22",name:"通学路・通学方法の確認"},
+    {id:"y23",name:"学年便りの作成"},
+    {id:"y24",name:"教材選び・注文・仕分け"},
+    {id:"y25",name:"前年度の会計報告"},
+    {id:"y26",name:"今年度の会計計画"},
+    {id:"y27",name:"校務分掌の引き継ぎ確認"},
+    {id:"y28",name:"年度始めの会議・役割決め"},
+    {id:"y29",name:"就学奨励費等の書類配布・回収"},
+    {id:"y30",name:"アレルギー対応の確認（給食）"}
+  ],
+  "年度末": [
+    {id:"e01",name:"指導要録の作成・入力"},
+    {id:"e02",name:"来年度のクラス分け"},
+    {id:"e03",name:"クラス分け名簿作り"},
+    {id:"e04",name:"次年度担任への引継事項の作成"},
+    {id:"e05",name:"学級会計の監査対応"},
+    {id:"e06",name:"年度末の会計報告（最終）"},
+    {id:"e07",name:"担当備品の棚卸し・確認"},
+    {id:"e08",name:"予算消化の確認"},
+    {id:"e09",name:"PCデータ・資料の整理"},
+    {id:"e10",name:"教室の整理整頓・原状回復"},
+    {id:"e11",name:"校務分掌の引継資料作成"},
+    {id:"e12",name:"個別の教育支援計画の引き継ぎ"},
+    {id:"e13",name:"卒業式の準備（6年担任）"},
+    {id:"e14",name:"中学校への引き継ぎ（6年担任）"},
+    {id:"e15",name:"卒業関連事務"}
+  ],
+  "長期休み": [
+    {id:"v01",name:"個人面談の実施"},
+    {id:"v02",name:"次学期分の週案作成"},
+    {id:"v03",name:"次学期分の学級便り作成"},
+    {id:"v04",name:"各教科の教材研究（3単元分目安）"},
+    {id:"v05",name:"研究授業の指導案作成"},
+    {id:"v06",name:"研究授業の教材作り"},
+    {id:"v07",name:"行事の台本作成・練習計画"},
+    {id:"v08",name:"宿泊行事のしおり作成"},
+    {id:"v09",name:"保護者説明会の資料作成"},
+    {id:"v10",name:"教材の注文"},
+    {id:"v11",name:"座席表の作成（次学期用）"},
+    {id:"v12",name:"机上やPCデータの整理"},
+    {id:"v13",name:"教室環境の整備"},
+    {id:"v14",name:"教員研修への参加"},
+    {id:"v15",name:"研修報告書の作成"},
+    {id:"v16",name:"夏季水泳教室の指導"},
+    {id:"v17",name:"プール指導"},
+    {id:"v18",name:"長期休みの宿題・課題の作成"},
+    {id:"v19",name:"休み中の生活指導プリント作成"},
+    {id:"v20",name:"配布物の準備・配布"}
+  ],
+  "学期始め": [
+    {id:"s01",name:"提出物の確認（未提出家庭への連絡）"},
+    {id:"s02",name:"長期休みの宿題の丸付け"},
+    {id:"s03",name:"自由研究・工作の掲示"},
+    {id:"s04",name:"書き初めの掲示・席書会"},
+    {id:"s05",name:"学期のめあてカード作成・掲示"},
+    {id:"s06",name:"当番表の更新・掲示"},
+    {id:"s07",name:"係カードの更新・掲示"},
+    {id:"s08",name:"個別の指導計画の評価・見直し"}
+  ],
+  "研修": [
+    {id:"r01",name:"初任者研修への参加"},
+    {id:"r02",name:"年次研修への参加"},
+    {id:"r03",name:"免許更新講習"},
+    {id:"r04",name:"校外研修への参加"},
+    {id:"r05",name:"研修報告書の作成"},
+    {id:"r06",name:"教育論文・実践報告の執筆"},
+    {id:"r07",name:"教育書籍・最新教育動向の学習"}
+  ]
+};
+
+var EVENT_MASTER = {
+  "入学式":{months:[4],tasks:[
+    {id:"ev01_01",name:"式場の会場設営"},
+    {id:"ev01_02",name:"教室の飾り付け・歓迎掲示"},
+    {id:"ev01_03",name:"入学児童の名簿確認"},
+    {id:"ev01_04",name:"配布物の準備"},
+    {id:"ev01_05",name:"式次第の作成・確認"},
+    {id:"ev01_06",name:"在校生の歓迎の出し物の練習"},
+    {id:"ev01_07",name:"受付・誘導の係分担"},
+    {id:"ev01_08",name:"保護者への説明資料準備"},
+    {id:"ev01_09",name:"記念写真撮影の段取り"}
+  ]},
+  "授業参観":{months:[4,6,10,1],tasks:[
+    {id:"ev02_01",name:"授業内容・指導案の作成"},
+    {id:"ev02_02",name:"教材・プリントの準備"},
+    {id:"ev02_03",name:"板書計画の作成"},
+    {id:"ev02_04",name:"教室の環境整備"},
+    {id:"ev02_05",name:"保護者への案内状の配布"},
+    {id:"ev02_06",name:"参観後の保護者会の資料準備"},
+    {id:"ev02_07",name:"受付名簿の準備"},
+    {id:"ev02_08",name:"児童の作品・ノートの展示準備"}
+  ]},
+  "保護者会・懇談会":{months:[4,7,12,3],tasks:[
+    {id:"ev03_01",name:"資料の作成"},
+    {id:"ev03_02",name:"会場の準備"},
+    {id:"ev03_03",name:"学級の成果物・写真の掲示"},
+    {id:"ev03_04",name:"進行台本の作成"},
+    {id:"ev03_05",name:"配布プリントの印刷"},
+    {id:"ev03_06",name:"出欠確認の集計"}
+  ]},
+  "家庭訪問・個人面談":{months:[4,5,7,8,12],tasks:[
+    {id:"ev04_01",name:"面談日程の調整・希望調査"},
+    {id:"ev04_02",name:"日程表の作成・配布"},
+    {id:"ev04_03",name:"各児童の記録・情報の整理"},
+    {id:"ev04_04",name:"面談で伝える内容のメモ作成"},
+    {id:"ev04_05",name:"面談記録用紙の準備"},
+    {id:"ev04_06",name:"面談後の記録の記入・保管"},
+    {id:"ev04_07",name:"訪問ルートの確認"}
+  ]},
+  "運動会":{months:[5,10],tasks:[
+    {id:"ev05_01",name:"練習計画の立案"},
+    {id:"ev05_02",name:"表現（ダンス）の選曲"},
+    {id:"ev05_03",name:"振り付けを覚える"},
+    {id:"ev05_04",name:"表現の指導"},
+    {id:"ev05_05",name:"隊形移動の考案・練習"},
+    {id:"ev05_06",name:"徒競走の走順決め"},
+    {id:"ev05_07",name:"徒競走の練習"},
+    {id:"ev05_08",name:"団体競技のチーム決め"},
+    {id:"ev05_09",name:"団体競技の練習"},
+    {id:"ev05_10",name:"プログラムの作成"},
+    {id:"ev05_11",name:"見どころ紹介文の作成"},
+    {id:"ev05_12",name:"放送台本の作成"},
+    {id:"ev05_13",name:"応援席のペグ打ち"},
+    {id:"ev05_14",name:"石灰・ライン引きの確認"},
+    {id:"ev05_15",name:"自身の係の仕事の確認・準備"},
+    {id:"ev05_16",name:"係分担の決定"},
+    {id:"ev05_17",name:"会場準備"},
+    {id:"ev05_18",name:"得点板・入退場門の準備"},
+    {id:"ev05_19",name:"雨天時の対応計画"},
+    {id:"ev05_20",name:"保護者への案内状の配布"}
+  ]},
+  "遠足・校外学習":{months:[5,6,10,11],tasks:[
+    {id:"ev06_01",name:"行き先の選定・下見"},
+    {id:"ev06_02",name:"実地踏査の実施"},
+    {id:"ev06_03",name:"しおりの作成"},
+    {id:"ev06_04",name:"班分け・グループ決め"},
+    {id:"ev06_05",name:"事前学習の授業準備"},
+    {id:"ev06_06",name:"バス会社・施設への予約"},
+    {id:"ev06_07",name:"保護者への案内状・同意書"},
+    {id:"ev06_08",name:"アレルギー・持病の確認"},
+    {id:"ev06_09",name:"緊急連絡先の一覧作成"},
+    {id:"ev06_10",name:"持ち物の確認リスト作成"},
+    {id:"ev06_11",name:"引率教員の役割分担"},
+    {id:"ev06_12",name:"当日のタイムスケジュール作成"},
+    {id:"ev06_13",name:"事後学習の計画"},
+    {id:"ev06_14",name:"保護者への報告・写真共有"}
+  ]},
+  "宿泊行事":{months:[6,7,9,10],tasks:[
+    {id:"ev07_01",name:"実地踏査の実施"},
+    {id:"ev07_02",name:"しおりの作成"},
+    {id:"ev07_03",name:"保護者説明会の資料作成"},
+    {id:"ev07_04",name:"保護者説明会の実施"},
+    {id:"ev07_05",name:"部屋割り・班決め"},
+    {id:"ev07_06",name:"キャンプファイヤー等のプログラム作成"},
+    {id:"ev07_07",name:"事前学習の授業準備"},
+    {id:"ev07_08",name:"持ち物リストの作成"},
+    {id:"ev07_09",name:"アレルギー・持病の確認・対応計画"},
+    {id:"ev07_10",name:"食事のアレルギー対応の連絡"},
+    {id:"ev07_11",name:"緊急時の対応マニュアル作成"},
+    {id:"ev07_12",name:"バス座席表の作成"},
+    {id:"ev07_13",name:"施設への最終確認連絡"},
+    {id:"ev07_14",name:"引率教員の役割分担"},
+    {id:"ev07_15",name:"事後学習の計画"},
+    {id:"ev07_16",name:"会計処理"}
+  ]},
+  "修学旅行":{months:[5,6,9,10,11],tasks:[
+    {id:"ev08_01",name:"行き先・コースの検討"},
+    {id:"ev08_02",name:"実地踏査の実施"},
+    {id:"ev08_03",name:"旅行業者との打ち合わせ"},
+    {id:"ev08_04",name:"しおりの作成"},
+    {id:"ev08_05",name:"保護者説明会の資料作成"},
+    {id:"ev08_06",name:"保護者説明会の実施"},
+    {id:"ev08_07",name:"部屋割り・班決め"},
+    {id:"ev08_08",name:"班別行動計画の指導"},
+    {id:"ev08_09",name:"事前学習の授業準備"},
+    {id:"ev08_10",name:"持ち物リストの作成"},
+    {id:"ev08_11",name:"アレルギー・持病の確認・対応計画"},
+    {id:"ev08_12",name:"緊急時の対応マニュアル作成"},
+    {id:"ev08_13",name:"バス座席表の作成"},
+    {id:"ev08_14",name:"お小遣いのルール決定"},
+    {id:"ev08_15",name:"施設・見学先への最終確認"},
+    {id:"ev08_16",name:"引率教員の役割分担"},
+    {id:"ev08_17",name:"事後学習・まとめ新聞等の計画"},
+    {id:"ev08_18",name:"会計処理"}
+  ]},
+  "音楽会・学芸会・学習発表会":{months:[10,11,2],tasks:[
+    {id:"ev09_01",name:"演目・曲目の選定"},
+    {id:"ev09_02",name:"台本・楽譜の準備"},
+    {id:"ev09_03",name:"練習計画の作成"},
+    {id:"ev09_04",name:"配役・パート決め"},
+    {id:"ev09_05",name:"衣装・小道具の準備"},
+    {id:"ev09_06",name:"大道具・背景の作成"},
+    {id:"ev09_07",name:"照明・音響の打ち合わせ"},
+    {id:"ev09_08",name:"ステージ使用スケジュール調整"},
+    {id:"ev09_09",name:"練習の指導"},
+    {id:"ev09_10",name:"リハーサルの実施"},
+    {id:"ev09_11",name:"プログラムの作成"},
+    {id:"ev09_12",name:"保護者への案内状の配布"},
+    {id:"ev09_13",name:"会場設営"},
+    {id:"ev09_14",name:"振り返り・感想文の指導"}
+  ]},
+  "展覧会・作品展":{months:[11,1,2],tasks:[
+    {id:"ev10_01",name:"出品する作品の選定・計画"},
+    {id:"ev10_02",name:"作品制作の指導"},
+    {id:"ev10_03",name:"作品カードの作成"},
+    {id:"ev10_04",name:"展示レイアウトの計画"},
+    {id:"ev10_05",name:"展示の設営"},
+    {id:"ev10_06",name:"保護者への案内状の配布"},
+    {id:"ev10_07",name:"鑑賞の授業の計画"},
+    {id:"ev10_08",name:"片付け・作品の返却"}
+  ]},
+  "避難訓練":{months:[4,5,6,7,9,10,11,12,1,2,3],tasks:[
+    {id:"ev11_01",name:"訓練の種類・想定の確認"},
+    {id:"ev11_02",name:"避難経路の確認"},
+    {id:"ev11_03",name:"児童への事前指導"},
+    {id:"ev11_04",name:"訓練当日の役割確認"},
+    {id:"ev11_05",name:"訓練の実施・引率"},
+    {id:"ev11_06",name:"訓練後の振り返り指導"},
+    {id:"ev11_07",name:"訓練記録の作成"}
+  ]},
+  "健康診断":{months:[4,5,6],tasks:[
+    {id:"ev12_01",name:"健康診断の日程確認"},
+    {id:"ev12_02",name:"健康カードの準備・配布"},
+    {id:"ev12_03",name:"児童への事前指導"},
+    {id:"ev12_04",name:"当日の引率・整列指導"},
+    {id:"ev12_05",name:"結果の配布・保護者への連絡"},
+    {id:"ev12_06",name:"事後措置の確認"}
+  ]},
+  "プール・水泳指導":{months:[6,7,8],tasks:[
+    {id:"ev13_01",name:"プール清掃"},
+    {id:"ev13_02",name:"水質検査の確認"},
+    {id:"ev13_03",name:"水泳カードの準備・配布"},
+    {id:"ev13_04",name:"指導計画の作成"},
+    {id:"ev13_05",name:"安全指導"},
+    {id:"ev13_06",name:"泳力チェック・グループ分け"},
+    {id:"ev13_07",name:"日々のプール指導"},
+    {id:"ev13_08",name:"水泳参加同意書の回収"},
+    {id:"ev13_09",name:"夏季水泳教室の計画・実施"}
+  ]},
+  "始業式・終業式":{months:[4,7,9,12,1,3],tasks:[
+    {id:"ev14_01",name:"式の流れ・立ち位置の確認"},
+    {id:"ev14_02",name:"児童への事前指導"},
+    {id:"ev14_03",name:"配布物の準備"},
+    {id:"ev14_04",name:"教室での学級指導の内容準備"},
+    {id:"ev14_05",name:"大掃除の分担・指導"}
+  ]},
+  "卒業式":{months:[2,3],tasks:[
+    {id:"ev15_01",name:"卒業式の練習計画作成"},
+    {id:"ev15_02",name:"呼びかけ・歌の指導"},
+    {id:"ev15_03",name:"証書授与の練習"},
+    {id:"ev15_04",name:"入退場の練習"},
+    {id:"ev15_05",name:"式場の会場設営"},
+    {id:"ev15_06",name:"卒業アルバムの写真選び"},
+    {id:"ev15_07",name:"卒業制作の指導"},
+    {id:"ev15_08",name:"在校生の送る言葉の練習"},
+    {id:"ev15_09",name:"保護者への案内状の配布"},
+    {id:"ev15_10",name:"中学校への引き継ぎ書類作成"},
+    {id:"ev15_11",name:"卒業証書の氏名確認"},
+    {id:"ev15_12",name:"式次第の確認"},
+    {id:"ev15_13",name:"記念品の準備"}
+  ]},
+  "6年生を送る会":{months:[2,3],tasks:[
+    {id:"ev16_01",name:"出し物・プレゼントの企画"},
+    {id:"ev16_02",name:"台本の作成"},
+    {id:"ev16_03",name:"練習計画の作成"},
+    {id:"ev16_04",name:"練習の指導"},
+    {id:"ev16_05",name:"飾り付け・プレゼントの制作"},
+    {id:"ev16_06",name:"会場設営"},
+    {id:"ev16_07",name:"リハーサルの実施"},
+    {id:"ev16_08",name:"当日の進行"}
+  ]},
+  "研究授業":{months:[6,9,10,11],tasks:[
+    {id:"ev17_01",name:"授業のテーマ・単元の決定"},
+    {id:"ev17_02",name:"指導案の作成"},
+    {id:"ev17_03",name:"教材・ワークシートの作成"},
+    {id:"ev17_04",name:"板書計画の作成"},
+    {id:"ev17_05",name:"事前の模擬授業"},
+    {id:"ev17_06",name:"参観者への指導案の配布"},
+    {id:"ev17_07",name:"授業の実施"},
+    {id:"ev17_08",name:"事後研究会への参加"},
+    {id:"ev17_09",name:"振り返り・改善点のまとめ"}
+  ]},
+  "就学時健康診断":{months:[10,11],tasks:[
+    {id:"ev18_01",name:"会場設営"},
+    {id:"ev18_02",name:"児童の引率・お世話係の指導"},
+    {id:"ev18_03",name:"検査の補助"},
+    {id:"ev18_04",name:"片付け"}
+  ]},
+  "体験入学":{months:[1,2],tasks:[
+    {id:"ev19_01",name:"体験授業の内容計画"},
+    {id:"ev19_02",name:"教材・プリントの準備"},
+    {id:"ev19_03",name:"在校生のお世話係の指導"},
+    {id:"ev19_04",name:"教室・校内の案内準備"},
+    {id:"ev19_05",name:"保護者への説明資料"},
+    {id:"ev19_06",name:"当日の引率・進行"}
+  ]},
+  "交通安全教室":{months:[4,5,10],tasks:[
+    {id:"ev20_01",name:"警察・交通安全協会への依頼"},
+    {id:"ev20_02",name:"会場・コースの準備"},
+    {id:"ev20_03",name:"児童への事前指導"},
+    {id:"ev20_04",name:"当日の進行・引率"},
+    {id:"ev20_05",name:"振り返り指導"}
+  ]}
+};
+
+var DUTY_MASTER = {
+  "教務部":[
+    {id:"du01_01",name:"教育課程の編成"},
+    {id:"du01_02",name:"年間行事予定の作成"},
+    {id:"du01_03",name:"時間割の作成・調整"},
+    {id:"du01_04",name:"指導要録の管理"},
+    {id:"du01_05",name:"学籍関係書類の管理"},
+    {id:"du01_06",name:"成績処理の取りまとめ"},
+    {id:"du01_07",name:"教科書の届出・配布"},
+    {id:"du01_08",name:"転出入児童の手続き"}
+  ],
+  "研究部":[
+    {id:"du02_01",name:"校内研究のテーマ設定"},
+    {id:"du02_02",name:"研究授業のスケジュール調整"},
+    {id:"du02_03",name:"公開授業の運営"},
+    {id:"du02_04",name:"外部講師の調整"},
+    {id:"du02_05",name:"全国学力テストの運営"},
+    {id:"du02_06",name:"全国学力テストの結果分析"},
+    {id:"du02_07",name:"研究紀要の作成"}
+  ],
+  "生活指導部":[
+    {id:"du03_01",name:"生活目標の設定"},
+    {id:"du03_02",name:"登下校指導"},
+    {id:"du03_03",name:"いじめ・不登校対応"},
+    {id:"du03_04",name:"いじめアンケートの実施・集計"},
+    {id:"du03_05",name:"長期休業中の生活指導"},
+    {id:"du03_06",name:"生活指導の記録・報告"}
+  ],
+  "安全指導部":[
+    {id:"du04_01",name:"避難訓練の企画・運営"},
+    {id:"du04_02",name:"不審者対応訓練の企画"},
+    {id:"du04_03",name:"交通安全教室の企画"},
+    {id:"du04_04",name:"通学路の安全点検"},
+    {id:"du04_05",name:"危険箇所の報告・対応"},
+    {id:"du04_06",name:"防災マニュアルの更新"}
+  ],
+  "保健指導部":[
+    {id:"du05_01",name:"健康診断の計画"},
+    {id:"du05_02",name:"感染症対策の周知"},
+    {id:"du05_03",name:"保健目標の掲示"},
+    {id:"du05_04",name:"保健だよりの原稿作成"},
+    {id:"du05_05",name:"アレルギー対応の確認"}
+  ],
+  "学習指導部":[
+    {id:"du06_01",name:"担当教科の教材・教具の管理"},
+    {id:"du06_02",name:"特別教室の管理"},
+    {id:"du06_03",name:"図書室の管理・読書企画"},
+    {id:"du06_04",name:"校内掲示板の管理"},
+    {id:"du06_05",name:"教材備品の発注"}
+  ],
+  "管理部（総務・設備）":[
+    {id:"du07_01",name:"備品・消耗品の発注・管理"},
+    {id:"du07_02",name:"清掃用具の管理"},
+    {id:"du07_03",name:"校内環境の点検・改善"},
+    {id:"du07_04",name:"備品台帳の更新"}
+  ],
+  "渉外部":[
+    {id:"du08_01",name:"学校だよりの発行"},
+    {id:"du08_02",name:"学校ホームページの更新"},
+    {id:"du08_03",name:"PTAとの連絡調整"},
+    {id:"du08_04",name:"地域ボランティアとの連絡"},
+    {id:"du08_05",name:"地域行事への協力・連携"}
+  ],
+  "ICT担当":[
+    {id:"du09_01",name:"タブレット端末の管理・設定"},
+    {id:"du09_02",name:"学習アプリの導入・管理"},
+    {id:"du09_03",name:"校務システムの運用サポート"},
+    {id:"du09_04",name:"ICT研修の企画・実施"},
+    {id:"du09_05",name:"機器トラブルの対応"},
+    {id:"du09_06",name:"デジタル連絡ツールの管理"}
+  ],
+  "放送担当":[
+    {id:"du10_01",name:"放送委員会の指導"},
+    {id:"du10_02",name:"放送機器の管理・点検"},
+    {id:"du10_03",name:"行事の放送準備・台本確認"}
+  ],
+  "掲示・環境整備担当":[
+    {id:"du11_01",name:"校内掲示物の管理・更新"},
+    {id:"du11_02",name:"季節の飾り付け"},
+    {id:"du11_03",name:"校内美化の推進"}
+  ]
+};
+
+// 月ごとのおすすめマッピング
+var MONTH_RECOMMEND = {
+  1:["学期始め","研修"],
+  2:["研修"],
+  3:["年度末","学期末"],
+  4:["年度初め"],
+  5:["毎月"],
+  6:["毎月"],
+  7:["学期末","長期休み"],
+  8:["長期休み"],
+  9:["学期始め"],
+  10:["毎月"],
+  11:["毎月"],
+  12:["学期末","長期休み"]
+};
+
+// ============================================================
+// アプリの状態
+// ============================================================
+var state = {
+  userId: null,
+  userName: '',
+  myTasks: [],
+  sharedTasks: [],
+  customMaster: [],
+  currentScreen: 'mytasks',
+  currentFilter: 'all',
+  currentSort: 'category',
+  currentAddTab: '毎日',
+  selectedEvent: null,
+  selectedDuty: null,
+  hasPassword: false,
+  hasUnsavedChanges: false,
+  editingTaskId: null,
+  selectedNewTasks: {},
+  sharedAddTab: '毎日',
+  sharedSelectedEvent: null,
+  sharedSelectedDuty: null,
+  sharedSelectedNewTasks: {}
+};
+
+// ============================================================
+// 初期化
+// ============================================================
+function initApp() {
+  initFontSize();
+  state.currentScreen = localStorage.getItem('taskapp_lastScreen') || 'mytasks'; if (state.currentScreen === 'shared') state.currentScreen = 'mytasks';
+
+  // 毎回ログイン画面を表示（localStorageに頼らない）
+  document.getElementById('loadingScreen').style.display = 'none';
+  document.getElementById('nameModal').classList.add('show');
+
+  // 前回のログイン名を入力欄に復元（補助的な利便性のみ）
+  var lastLoginName = localStorage.getItem('taskapp_lastLoginName') || '';
+  document.getElementById('loginName').value = lastLoginName;
+
+  initNumpad('numpadLogin', 'pinDisplayLogin');
+}
+
+// ============================================================
+// 数字パッド共通ロジック
+// ============================================================
+var pinStates = {};
+
+function initNumpad(padId, displayId) {
+  pinStates[padId] = '';
+  var pad = document.getElementById(padId);
+  var html = '';
+  for (var n = 1; n <= 9; n++) {
+    html += '<button class="numpad-btn" onclick="pinInput(\'' + padId + '\',\'' + displayId + '\',' + n + ')">' + n + '</button>';
+  }
+  html += '<button class="numpad-btn empty"></button>';
+  html += '<button class="numpad-btn" onclick="pinInput(\'' + padId + '\',\'' + displayId + '\',0)">0</button>';
+  html += '<button class="numpad-btn del" onclick="pinDelete(\'' + padId + '\',\'' + displayId + '\')">← 削除</button>';
+  pad.innerHTML = html;
+  renderPinDisplay(padId, displayId);
+}
+
+function pinInput(padId, displayId, num) {
+  if (pinStates[padId].length >= 4) return;
+  pinStates[padId] += String(num);
+  renderPinDisplay(padId, displayId);
+}
+
+function pinDelete(padId, displayId) {
+  pinStates[padId] = pinStates[padId].slice(0, -1);
+  renderPinDisplay(padId, displayId);
+}
+
+function renderPinDisplay(padId, displayId) {
+  var pin = pinStates[padId];
+  var boxes = document.getElementById(displayId).querySelectorAll('.pin-box');
+  for (var i = 0; i < 4; i++) {
+    boxes[i].textContent = pin[i] !== undefined ? '●' : '';
+    boxes[i].className = 'pin-box';
+    if (i < pin.length) boxes[i].classList.add('filled');
+    if (i === pin.length) boxes[i].classList.add('active');
+  }
+}
+
+function getPinValue(padId) {
+  return pinStates[padId] || '';
+}
+
+function resetPin(padId, displayId) {
+  pinStates[padId] = '';
+  renderPinDisplay(padId, displayId);
+}
+
+// ============================================================
+// セットアップ画面の切り替え
+// ============================================================
+function showRegisterForm() {
+  document.getElementById('loginForm').style.display = 'none';
+  document.getElementById('registerForm').style.display = 'block';
+  initNumpad('numpadMulti', 'pinDisplayMulti');
+  document.getElementById('nameCheckMsg').innerHTML = '';
+}
+function showLoginFormFromRegister() {
+  document.getElementById('registerForm').style.display = 'none';
+  document.getElementById('loginForm').style.display = 'block';
+  document.getElementById('loginMsg').innerHTML = '';
+  resetPin('numpadLogin', 'pinDisplayLogin');
+}
+
+// --- 新規登録（名前+4桁パスコード） ---
+function submitNameMulti() {
+  var name = document.getElementById('nameInputMulti').value.trim();
+  var pin = getPinValue('numpadMulti');
+  var msg = document.getElementById('nameCheckMsg');
+
+  if (!name) { msg.innerHTML = '<span style="color:#dc2626;">名前を入力してください</span>'; return; }
+  if (pin.length !== 4) { msg.innerHTML = '<span style="color:#dc2626;">4桁のパスコードを入力してください</span>'; return; }
+
+  msg.innerHTML = '<span style="color:#64748b;">確認中...</span>';
+
+  google.script.run
+    .withSuccessHandler(function(exists) {
+      if (exists) {
+        msg.innerHTML = '<span style="color:#dc2626;">この名前はすでに使われています。「山田太郎（1年）」のようにクラス名を加えると区別しやすくなります。</span>';
+        return;
+      }
+      var userId = 'u_' + Date.now() + '_' + Math.random().toString(36).substr(2,6);
+      state.userId = userId;
+      state.userName = name;
+      state.hasPassword = true;
+      localStorage.setItem('taskapp_lastLoginName', name);
+
+      document.getElementById('nameModal').classList.remove('show');
+      document.getElementById('loadingScreen').style.display = 'flex';
+
+      google.script.run
+        .withSuccessHandler(function() { loadAllData(); })
+        .withFailureHandler(function(e) { showToast('エラー: ' + e.message); })
+        .createUserWithPassword(userId, name, pin);
+    })
+    .withFailureHandler(function(e) { msg.innerHTML = '<span style="color:#dc2626;">エラー: ' + e.message + '</span>'; })
+    .checkNameExists(name);
+}
+
+// --- ログイン ---
+function submitLogin() {
+  var name = document.getElementById('loginName').value.trim();
+  var pin = getPinValue('numpadLogin');
+  var msg = document.getElementById('loginMsg');
+
+  if (!name) { msg.textContent = '名前を入力してください'; msg.style.color = '#dc2626'; return; }
+  if (pin.length !== 4) { msg.textContent = '4桁のパスコードを入力してください'; msg.style.color = '#dc2626'; return; }
+
+  msg.textContent = 'ログイン中...';
+  msg.style.color = '#64748b';
+
+  google.script.run
+    .withSuccessHandler(function(user) {
+      if (!user) {
+        msg.textContent = '名前またはパスコードが正しくありません';
+        msg.style.color = '#dc2626';
+        return;
+      }
+      state.userId = user.userId;
+      state.userName = user.userName;
+      state.hasPassword = true;
+      // ログイン名だけ記憶（次回の入力を楽にするため）
+      localStorage.setItem('taskapp_lastLoginName', name);
+
+      document.getElementById('nameModal').classList.remove('show');
+      document.getElementById('loadingScreen').style.display = 'flex';
+      loadAllData();
+    })
+    .withFailureHandler(function(e) {
+      msg.textContent = 'エラー: ' + e.message;
+      msg.style.color = '#dc2626';
+    })
+    .loginWithPassword(name, pin);
+}
+
+function loadAllData() {
+  var loaded = 0;
+  var total = 3;
+  function checkDone() {
+    loaded++;
+    if (loaded >= total) {
+      document.getElementById('loadingScreen').style.display = 'none';
+      document.getElementById('app').style.display = 'block';
+      document.getElementById('headerUserName').textContent = state.userName + ' 先生';
+      document.getElementById('settingsName').value = state.userName;
+      switchScreen(state.currentScreen);
+      renderAddTabs();
+      showRecommendations();
+    }
+  }
+
+  google.script.run.withSuccessHandler(function(json) {
+    var parsed = JSON.parse(json);
+    // サーバー側でエラーが起きた場合はerrorプロパティが返る
+    if (parsed && parsed.error) {
+      showToast('マイタスク読み込みエラー: ' + parsed.error);
+      console.error('loadMyTasks server error:', parsed);
+      state.myTasks = [];
+    } else if (Array.isArray(parsed)) {
+      state.myTasks = parsed;
+    } else {
+      state.myTasks = [];
+    }
+    checkDone();
+  }).withFailureHandler(function(e){
+    console.error('loadMyTasks error:', e);
+    showToast('マイタスクの読み込みに失敗しました: ' + (e && e.message ? e.message : '不明なエラー'));
+    checkDone();
+  }).loadMyTasks(state.userId);
+
+  google.script.run.withSuccessHandler(function(json) {
+    state.sharedTasks = JSON.parse(json); checkDone();
+  }).withFailureHandler(function(e){
+    console.error('loadSharedTasks error:', e);
+    checkDone();
+  }).loadSharedTasks();
+
+  google.script.run.withSuccessHandler(function(json) {
+    state.customMaster = JSON.parse(json); checkDone();
+  }).withFailureHandler(function(e){
+    console.error('loadCustomMaster error:', e);
+    checkDone();
+  }).loadCustomMaster();
+}
+
+// ============================================================
+// 画面切り替え
+// ============================================================
+function switchScreen(name) {
+  state.currentScreen = name;
+  localStorage.setItem('taskapp_lastScreen', name);
+  document.querySelectorAll('.screen').forEach(function(s){ s.classList.remove('active'); });
+  document.getElementById('screen-' + name).classList.add('active');
+  document.querySelectorAll('.header-tabs .nav-item').forEach(function(n){
+    n.classList.toggle('active', n.dataset.screen === name);
+  });
+
+  if (name === 'mytasks') renderMyTasks();
+  else if (name === 'addtask') renderAddContent();
+  else if (name === 'shared') renderSharedTasks();
+  else if (name === 'settings') renderSettings();
+}
+
+// ============================================================
+// マイタスク画面
+// ============================================================
+function renderMyTasks() {
+  var list = document.getElementById('myTaskList');
+  var tasks = getFilteredTasks();
+  tasks = getSortedTasks(tasks);
+
+  if (tasks.length === 0 && state.myTasks.length === 0) {
+    list.innerHTML = '';
+    document.getElementById('emptyState').style.display = 'block';
+    return;
+  }
+  document.getElementById('emptyState').style.display = 'none';
+
+  if (state.currentSort === 'category') {
+    var groups = {};
+    tasks.forEach(function(t) {
+      var key = t.subCategory ? t.category + ' / ' + t.subCategory : t.category;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(t);
+    });
+    var html = '';
+    Object.keys(groups).forEach(function(key) {
+      var g = groups[key];
+      var done = g.filter(function(t){return t.isCompleted;}).length;
+      var pct = Math.round(done / g.length * 100);
+      html += '<div class="card"><h2>' + esc(key) + '</h2>';
+      html += '<div class="progress-wrap"><div class="progress-bar"><div class="progress-fill" style="width:' + pct + '%"></div></div>';
+      html += '<div class="progress-text">' + done + ' / ' + g.length + ' 完了</div></div>';
+      g.forEach(function(t){ html += renderTaskItem(t); });
+      html += '</div>';
+    });
+    list.innerHTML = html;
+  } else {
+    var html = '<div class="card">';
+    tasks.forEach(function(t){ html += renderTaskItem(t); });
+    html += '</div>';
+    list.innerHTML = html;
+  }
+}
+
+function renderTaskItem(t) {
+  var checkedClass = t.isCompleted ? ' checked' : '';
+  var nameClass = t.isCompleted ? ' completed' : '';
+  var meta = '';
+  if (t.priority && t.priority !== '中') {
+    var pClass = t.priority === '高' ? 'high' : 'low';
+    meta += '<span class="task-tag ' + pClass + '">' + esc(t.priority) + '</span>';
+  }
+  if (t.deadline) {
+    var isOverdue = !t.isCompleted && new Date(t.deadline) < new Date(new Date().toDateString());
+    meta += '<span class="task-tag deadline' + (isOverdue ? ' high' : '') + '">' + t.deadline + '</span>';
+  }
+  if (t.memo) {
+    meta += '<span class="task-memo-btn" onclick="event.stopPropagation();openDetail(\'' + t.id + '\')">memo</span>';
+  }
+
+  return '<div class="task-item">' +
+    '<div class="task-check' + checkedClass + '" onclick="toggleTask(\'' + t.id + '\')"></div>' +
+    '<div class="task-info" onclick="openDetail(\'' + t.id + '\')">' +
+    '<div class="task-name' + nameClass + '">' + esc(t.taskName) + '</div>' +
+    (meta ? '<div class="task-meta">' + meta + '</div>' : '') +
+    '</div></div>';
+}
+
+function toggleTask(id) {
+  var t = state.myTasks.find(function(x){return x.id===id;});
+  if (t) {
+    t.isCompleted = !t.isCompleted;
+    t.completedAt = t.isCompleted ? new Date().toISOString() : '';
+    state.hasUnsavedChanges = true;
+    updateSaveButton();
+    scheduleAutoSave();
+    renderMyTasks();
+  }
+}
+
+function getFilteredTasks() {
+  var tasks = state.myTasks.slice();
+  if (state.currentFilter === 'today') {
+    var today = new Date().toISOString().slice(0,10);
+    tasks = tasks.filter(function(t) {
+      return t.category === '毎日' || t.deadline === today || (!t.isCompleted && t.deadline && t.deadline <= today);
+    });
+  } else if (state.currentFilter === 'incomplete') {
+    tasks = tasks.filter(function(t){ return !t.isCompleted; });
+  }
+  return tasks;
+}
+
+function getSortedTasks(tasks) {
+  var sort = state.currentSort;
+  if (sort === 'priority') {
+    var order = {'高':0,'中':1,'低':2};
+    tasks.sort(function(a,b){ return (order[a.priority]||1) - (order[b.priority]||1); });
+  } else if (sort === 'deadline') {
+    tasks.sort(function(a,b){
+      var da = a.deadline || '9999-99-99';
+      var db = b.deadline || '9999-99-99';
+      return da.localeCompare(db);
+    });
+  }
+  // カテゴリ順はrenderMyTasksで処理
+  return tasks;
+}
+
+function setFilter(f) {
+  state.currentFilter = f;
+  document.querySelectorAll('.filter-btn').forEach(function(b){
+    b.classList.toggle('active', b.dataset.filter === f);
+  });
+  renderMyTasks();
+}
+
+function sortTasks() {
+  state.currentSort = document.getElementById('sortSelect').value;
+  renderMyTasks();
+}
+
+// ============================================================
+// タスク詳細モーダル
+// ============================================================
+function openDetail(id) {
+  var t = state.myTasks.find(function(x){return x.id===id;});
+  if (!t) return;
+  state.editingTaskId = id;
+  document.getElementById('detailTitle').textContent = t.taskName;
+  document.getElementById('detailPriority').value = t.priority || '中';
+  document.getElementById('detailDeadline').value = t.deadline || '';
+  document.getElementById('detailMemo').value = t.memo || '';
+  document.getElementById('taskDetailModal').classList.add('show');
+}
+
+function saveTaskDetail() {
+  var t = state.myTasks.find(function(x){return x.id===state.editingTaskId;});
+  if (!t) return;
+  t.priority = document.getElementById('detailPriority').value;
+  t.deadline = document.getElementById('detailDeadline').value;
+  t.memo = document.getElementById('detailMemo').value;
+  state.hasUnsavedChanges = true;
+  updateSaveButton();
+  scheduleAutoSave();
+  closeModal('taskDetailModal');
+  renderMyTasks();
+}
+
+function deleteTask() {
+  if (!confirm('このタスクを削除しますか？')) return;
+  state.myTasks = state.myTasks.filter(function(t){return t.id !== state.editingTaskId;});
+  state.hasUnsavedChanges = true;
+  updateSaveButton();
+  scheduleAutoSave();
+  closeModal('taskDetailModal');
+  renderMyTasks();
+}
+
+// ============================================================
+// タスク追加画面
+// ============================================================
+var ADD_TABS = ['毎日','毎週','毎月','学期末','年度初め','年度末','長期休み','学期始め','行事','校務分掌','研修'];
+
+function renderAddTabs() {
+  var html = '';
+  ADD_TABS.forEach(function(tab) {
+    var cls = tab === state.currentAddTab ? ' active' : '';
+    html += '<button class="tab-btn' + cls + '" onclick="selectAddTab(\'' + escAttr(tab) + '\')">' + esc(tab) + '</button>';
+  });
+  document.getElementById('addTabs').innerHTML = html;
+}
+
+function selectAddTab(tab) {
+  state.currentAddTab = tab;
+  state.selectedEvent = null;
+  state.selectedDuty = null;
+  state.selectedNewTasks = {};
+  renderAddTabs();
+  renderAddContent();
+}
+
+function renderAddContent() {
+  var container = document.getElementById('addContent');
+  var tab = state.currentAddTab;
+
+  if (tab === '行事') {
+    if (state.selectedEvent) {
+      renderEventTasks(container);
+    } else {
+      renderEventList(container);
+    }
+  } else if (tab === '校務分掌') {
+    if (state.selectedDuty) {
+      renderDutyTasks(container);
+    } else {
+      renderDutyList(container);
+    }
+  } else {
+    renderFrequencyTasks(container, tab);
+  }
+}
+
+function renderFrequencyTasks(container, tab) {
+  var tasks = (TASK_MASTER[tab] || []).slice();
+  // カスタムマスターを追加
+  state.customMaster.forEach(function(c) {
+    if (c.category === tab) tasks.push({id: c.id, name: c.taskName});
+  });
+
+  var existIds = {};
+  state.myTasks.forEach(function(t){ existIds[t.taskName] = true; });
+
+  var html = '<div class="select-group">';
+  html += '<div class="select-group-header"><span class="select-group-title">' + esc(tab) + ' のタスク（' + tasks.length + '件）</span>';
+  html += '<button class="select-all-btn" onclick="selectAllInTab()">全選択</button></div>';
+
+  tasks.forEach(function(t) {
+    var already = existIds[t.name];
+    var checked = state.selectedNewTasks[t.id] ? ' checked' : '';
+    var label = already ? esc(t.name) + ' <span style="color:#94a3b8;font-size:11px;">（追加済み）</span>' : esc(t.name);
+    html += '<div class="select-item">';
+    html += '<div class="select-box' + checked + '" onclick="toggleSelect(\'' + t.id + '\')"></div>';
+    html += '<span class="select-label" onclick="toggleSelect(\'' + t.id + '\')">' + label + '</span>';
+    html += '</div>';
+  });
+  html += '</div>';
+
+  // 自由入力欄
+  html += '<div class="card" style="margin-top:12px;"><h2>オリジナルタスクを追加</h2>';
+  html += '<input type="text" id="freeTaskInput" placeholder="タスク名を入力" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:8px;">';
+  html += '<button class="btn btn-outline" onclick="addFreeTask(\'' + escAttr(tab) + '\')">追加</button></div>';
+
+  container.innerHTML = html;
+}
+
+function renderEventList(container) {
+  var currentMonth = new Date().getMonth() + 1;
+  var html = '<div class="event-list">';
+  Object.keys(EVENT_MASTER).forEach(function(name) {
+    var ev = EVENT_MASTER[name];
+    var isRecommended = ev.months.indexOf(currentMonth) >= 0;
+    var badge = isRecommended ? '<span style="display:block;font-size:10px;color:#d97706;margin-top:4px;">今月おすすめ</span>' : '';
+    html += '<div class="event-card" onclick="selectEvent(\'' + escAttr(name) + '\')">' + esc(name) + badge + '</div>';
+  });
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function selectEvent(name) {
+  state.selectedEvent = name;
+  state.selectedNewTasks = {};
+  renderAddContent();
+}
+
+function renderEventTasks(container) {
+  var name = state.selectedEvent;
+  var ev = EVENT_MASTER[name];
+  if (!ev) return;
+
+  var tasks = ev.tasks.slice();
+  state.customMaster.forEach(function(c) {
+    if (c.category === '行事' && c.subCategory === name) tasks.push({id: c.id, name: c.taskName});
+  });
+
+  var existIds = {};
+  state.myTasks.forEach(function(t){ existIds[t.taskName] = true; });
+
+  var html = '<div class="back-btn" onclick="state.selectedEvent=null;renderAddContent();">← 行事一覧に戻る</div>';
+  html += '<div class="select-group">';
+  html += '<div class="select-group-header"><span class="select-group-title">' + esc(name) + ' のタスク（' + tasks.length + '件）</span>';
+  html += '<button class="select-all-btn" onclick="selectAllInTab()">全選択</button></div>';
+
+  tasks.forEach(function(t) {
+    var already = existIds[t.name];
+    var checked = state.selectedNewTasks[t.id] ? ' checked' : '';
+    var label = already ? esc(t.name) + ' <span style="color:#94a3b8;font-size:11px;">（追加済み）</span>' : esc(t.name);
+    html += '<div class="select-item">';
+    html += '<div class="select-box' + checked + '" onclick="toggleSelect(\'' + t.id + '\')"></div>';
+    html += '<span class="select-label" onclick="toggleSelect(\'' + t.id + '\')">' + label + '</span></div>';
+  });
+  html += '</div>';
+
+  // この行事にオリジナルタスクを追加
+  html += '<div class="card" style="margin-top:12px;"><h2>この行事にタスクを追加</h2>';
+  html += '<input type="text" id="customEventTaskInput" placeholder="タスク名を入力" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:8px;">';
+  html += '<button class="btn btn-outline" onclick="addCustomTaskToCategory(\'行事\',\'' + escAttr(name) + '\')">追加して候補に保存</button></div>';
+
+  container.innerHTML = html;
+}
+
+function renderDutyList(container) {
+  var html = '<div class="event-list">';
+  Object.keys(DUTY_MASTER).forEach(function(name) {
+    html += '<div class="event-card" onclick="selectDuty(\'' + escAttr(name) + '\')">' + esc(name) + '</div>';
+  });
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function selectDuty(name) {
+  state.selectedDuty = name;
+  state.selectedNewTasks = {};
+  renderAddContent();
+}
+
+function renderDutyTasks(container) {
+  var name = state.selectedDuty;
+  var tasks = (DUTY_MASTER[name] || []).slice();
+  state.customMaster.forEach(function(c) {
+    if (c.category === '校務分掌' && c.subCategory === name) tasks.push({id: c.id, name: c.taskName});
+  });
+
+  var existIds = {};
+  state.myTasks.forEach(function(t){ existIds[t.taskName] = true; });
+
+  var html = '<div class="back-btn" onclick="state.selectedDuty=null;renderAddContent();">← 校務分掌一覧に戻る</div>';
+  html += '<div class="select-group">';
+  html += '<div class="select-group-header"><span class="select-group-title">' + esc(name) + ' のタスク（' + tasks.length + '件）</span>';
+  html += '<button class="select-all-btn" onclick="selectAllInTab()">全選択</button></div>';
+
+  tasks.forEach(function(t) {
+    var already = existIds[t.name];
+    var checked = state.selectedNewTasks[t.id] ? ' checked' : '';
+    var label = already ? esc(t.name) + ' <span style="color:#94a3b8;font-size:11px;">（追加済み）</span>' : esc(t.name);
+    html += '<div class="select-item">';
+    html += '<div class="select-box' + checked + '" onclick="toggleSelect(\'' + t.id + '\')"></div>';
+    html += '<span class="select-label" onclick="toggleSelect(\'' + t.id + '\')">' + label + '</span></div>';
+  });
+  html += '</div>';
+
+  // この校務分掌にオリジナルタスクを追加
+  html += '<div class="card" style="margin-top:12px;"><h2>この分掌にタスクを追加</h2>';
+  html += '<input type="text" id="customDutyTaskInput" placeholder="タスク名を入力" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:8px;">';
+  html += '<button class="btn btn-outline" onclick="addCustomTaskToCategory(\'校務分掌\',\'' + escAttr(name) + '\')">追加して候補に保存</button></div>';
+
+  container.innerHTML = html;
+}
+
+function toggleSelect(id) {
+  state.selectedNewTasks[id] = !state.selectedNewTasks[id];
+  renderAddContent();
+}
+
+function selectAllInTab() {
+  var tasks = getCurrentTabTasks();
+  var allSelected = tasks.every(function(t){return state.selectedNewTasks[t.id];});
+  tasks.forEach(function(t){ state.selectedNewTasks[t.id] = !allSelected; });
+  renderAddContent();
+}
+
+function getCurrentTabTasks() {
+  var tab = state.currentAddTab;
+  if (tab === '行事' && state.selectedEvent) {
+    var tasks = EVENT_MASTER[state.selectedEvent].tasks.slice();
+    state.customMaster.forEach(function(c) {
+      if (c.category === '行事' && c.subCategory === state.selectedEvent) tasks.push({id:c.id,name:c.taskName});
+    });
+    return tasks;
+  }
+  if (tab === '校務分掌' && state.selectedDuty) {
+    var tasks = (DUTY_MASTER[state.selectedDuty] || []).slice();
+    state.customMaster.forEach(function(c) {
+      if (c.category === '校務分掌' && c.subCategory === state.selectedDuty) tasks.push({id:c.id,name:c.taskName});
+    });
+    return tasks;
+  }
+  var tasks = (TASK_MASTER[tab] || []).slice();
+  state.customMaster.forEach(function(c) {
+    if (c.category === tab) tasks.push({id:c.id,name:c.taskName});
+  });
+  return tasks;
+}
+
+function addSelectedToMyTasks() {
+  var tasks = getCurrentTabTasks();
+  var added = 0;
+  tasks.forEach(function(t) {
+    if (!state.selectedNewTasks[t.id]) return;
+    // 重複チェック
+    var exists = state.myTasks.some(function(m){return m.taskName === t.name;});
+    if (exists) return;
+
+    var cat = state.currentAddTab;
+    var sub = '';
+    if (cat === '行事') sub = state.selectedEvent || '';
+    else if (cat === '校務分掌') sub = state.selectedDuty || '';
+
+    state.myTasks.push({
+      id: 'mt_' + Date.now() + '_' + Math.random().toString(36).substr(2,4),
+      taskName: t.name,
+      category: cat,
+      subCategory: sub,
+      priority: '中',
+      deadline: '',
+      memo: '',
+      isCompleted: false,
+      completedAt: '',
+      createdAt: new Date().toISOString()
+    });
+    added++;
+  });
+
+  if (added > 0) {
+    state.hasUnsavedChanges = true;
+    updateSaveButton();
+    scheduleAutoSave();
+    showToast(added + '件のタスクを追加しました');
+    state.selectedNewTasks = {};
+    renderAddContent();
+  } else {
+    showToast('新しいタスクがありません');
+  }
+}
+
+function addFreeTask(category) {
+  var input = document.getElementById('freeTaskInput');
+  var name = input.value.trim();
+  if (!name) { showToast('タスク名を入力してください'); return; }
+
+  state.myTasks.push({
+    id: 'mt_' + Date.now() + '_' + Math.random().toString(36).substr(2,4),
+    taskName: name,
+    category: category,
+    subCategory: '',
+    priority: '中',
+    deadline: '',
+    memo: '',
+    isCompleted: false,
+    completedAt: '',
+    createdAt: new Date().toISOString()
+  });
+
+  state.hasUnsavedChanges = true;
+  updateSaveButton();
+  scheduleAutoSave();
+  input.value = '';
+  showToast('「' + name + '」を追加しました');
+}
+
+function addCustomTaskToCategory(category, subCategory) {
+  var inputId = category === '行事' ? 'customEventTaskInput' : 'customDutyTaskInput';
+  var input = document.getElementById(inputId);
+  var name = input.value.trim();
+  if (!name) { showToast('タスク名を入力してください'); return; }
+
+  // カスタムマスターに保存（次回以降も候補に表示される）
+  var customId = 'cm_' + Date.now() + '_' + Math.random().toString(36).substr(2,4);
+  var newCustom = {id: customId, category: category, subCategory: subCategory, taskName: name};
+  state.customMaster.push(newCustom);
+  google.script.run.addCustomMasterTask(JSON.stringify(newCustom));
+
+  input.value = '';
+  showToast('「' + name + '」を候補に追加しました');
+  renderAddContent();
+}
+
+// ============================================================
+// クイック追加
+// ============================================================
+function showQuickAddModal() {
+  document.getElementById('quickTaskName').value = '';
+  document.getElementById('quickDeadline').value = '';
+  document.getElementById('quickAddModal').classList.add('show');
+}
+
+function quickAdd() {
+  var name = document.getElementById('quickTaskName').value.trim();
+  if (!name) { showToast('タスク名を入力してください'); return; }
+
+  state.myTasks.push({
+    id: 'mt_' + Date.now() + '_' + Math.random().toString(36).substr(2,4),
+    taskName: name,
+    category: document.getElementById('quickCategory').value,
+    subCategory: '',
+    priority: document.getElementById('quickPriority').value,
+    deadline: document.getElementById('quickDeadline').value,
+    memo: '',
+    isCompleted: false,
+    completedAt: '',
+    createdAt: new Date().toISOString()
+  });
+
+  state.hasUnsavedChanges = true;
+  updateSaveButton();
+  scheduleAutoSave();
+  closeModal('quickAddModal');
+  showToast('タスクを追加しました');
+  if (state.currentScreen === 'mytasks') renderMyTasks();
+}
+
+// ============================================================
+// 共有タスク画面
+// ============================================================
+function renderSharedTasks() {
+  var list = document.getElementById('sharedTaskList');
+  if (state.sharedTasks.length === 0) {
+    list.innerHTML = '';
+    document.getElementById('sharedEmpty').style.display = 'block';
+    return;
+  }
+  document.getElementById('sharedEmpty').style.display = 'none';
+
+  var html = '';
+  state.sharedTasks.forEach(function(t) {
+    var checkedClass = t.isCompleted ? ' checked' : '';
+    var nameClass = t.isCompleted ? ' completed' : '';
+    var meta = '';
+    if (t.assignee) meta += '<span class="task-tag">' + esc(t.assignee) + '</span>';
+    if (t.deadline) meta += '<span class="task-tag deadline">' + t.deadline + '</span>';
+    if (t.completedBy) meta += '<span class="task-tag" style="background:#f0fdf4;color:#16a34a;">' + esc(t.completedBy) + 'が完了</span>';
+
+    html += '<div class="card" style="margin-bottom:8px;"><div class="task-item">' +
+      '<div class="task-check' + checkedClass + '" onclick="toggleShared(\'' + t.id + '\')"></div>' +
+      '<div class="task-info">' +
+      '<div class="task-name' + nameClass + '">' + esc(t.taskName) + '</div>' +
+      (meta ? '<div class="task-meta">' + meta + '</div>' : '') +
+      (t.memo ? '<div style="font-size:11px;color:#64748b;margin-top:4px;">' + esc(t.memo) + '</div>' : '') +
+      '</div></div></div>';
+  });
+  list.innerHTML = html;
+}
+
+function toggleShared(id) {
+  var t = state.sharedTasks.find(function(x){return x.id===id;});
+  if (t) {
+    t.isCompleted = !t.isCompleted;
+    t.completedAt = t.isCompleted ? new Date().toISOString() : '';
+    t.completedBy = t.isCompleted ? state.userName : '';
+    state.hasUnsavedChanges = true;
+    updateSaveButton();
+    scheduleAutoSave();
+    renderSharedTasks();
+  }
+}
+
+function showAddSharedModal() {
+  document.getElementById('sharedTaskName').value = '';
+  document.getElementById('sharedAssignee').value = '';
+  document.getElementById('sharedDeadline').value = '';
+  document.getElementById('sharedMemo').value = '';
+  document.getElementById('sharedAddModal').classList.add('show');
+}
+
+function addSharedTask() {
+  var name = document.getElementById('sharedTaskName').value.trim();
+  if (!name) { showToast('タスク名を入力してください'); return; }
+
+  state.sharedTasks.push({
+    id: 'sh_' + Date.now() + '_' + Math.random().toString(36).substr(2,4),
+    taskName: name,
+    category: document.getElementById('sharedCategory').value,
+    subCategory: '',
+    priority: '中',
+    deadline: document.getElementById('sharedDeadline').value,
+    memo: document.getElementById('sharedMemo').value,
+    assignee: document.getElementById('sharedAssignee').value,
+    isCompleted: false,
+    completedAt: '',
+    completedBy: '',
+    createdBy: state.userName,
+    createdAt: new Date().toISOString()
+  });
+
+  state.hasUnsavedChanges = true;
+  updateSaveButton();
+  scheduleAutoSave();
+  closeModal('sharedAddModal');
+  renderSharedTasks();
+  showToast('共有タスクを追加しました');
+}
+
+// ============================================================
+// 共有タスク追加モード（タブ選択式）
+// ============================================================
+function switchSharedMode(mode) {
+  var listMode = document.getElementById('sharedListMode');
+  var addMode = document.getElementById('sharedAddMode');
+  var btnList = document.getElementById('sharedModeList');
+  var btnAdd = document.getElementById('sharedModeAdd');
+
+  if (mode === 'add') {
+    listMode.style.display = 'none';
+    addMode.style.display = 'block';
+    btnList.className = 'btn btn-outline';
+    btnAdd.className = 'btn btn-primary';
+    state.sharedAddTab = '毎日';
+    state.sharedSelectedEvent = null;
+    state.sharedSelectedDuty = null;
+    state.sharedSelectedNewTasks = {};
+    renderSharedAddTabs();
+    renderSharedAddContent();
+  } else {
+    listMode.style.display = 'block';
+    addMode.style.display = 'none';
+    btnList.className = 'btn btn-primary';
+    btnAdd.className = 'btn btn-outline';
+  }
+}
+
+function renderSharedAddTabs() {
+  var allTabs = Object.keys(TASK_MASTER).concat(['行事','校務分掌']);
+  var html = '';
+  allTabs.forEach(function(tab) {
+    var cls = (state.sharedAddTab === tab) ? ' active' : '';
+    html += '<button class="tab-btn' + cls + '" onclick="selectSharedAddTab(\'' + escAttr(tab) + '\')">' + esc(tab) + '</button>';
+  });
+  document.getElementById('sharedAddTabs').innerHTML = html;
+}
+
+function selectSharedAddTab(tab) {
+  state.sharedAddTab = tab;
+  state.sharedSelectedEvent = null;
+  state.sharedSelectedDuty = null;
+  state.sharedSelectedNewTasks = {};
+  renderSharedAddTabs();
+  renderSharedAddContent();
+}
+
+function renderSharedAddContent() {
+  var container = document.getElementById('sharedAddContent');
+  var tab = state.sharedAddTab;
+  if (tab === '行事') {
+    if (state.sharedSelectedEvent) {
+      renderSharedEventTasks(container);
+    } else {
+      renderSharedEventList(container);
+    }
+  } else if (tab === '校務分掌') {
+    if (state.sharedSelectedDuty) {
+      renderSharedDutyTasks(container);
+    } else {
+      renderSharedDutyList(container);
+    }
+  } else {
+    renderSharedFrequencyTasks(container, tab);
+  }
+}
+
+function renderSharedFrequencyTasks(container, tab) {
+  var tasks = (TASK_MASTER[tab] || []).slice();
+  state.customMaster.forEach(function(c) {
+    if (c.category === tab) tasks.push({id: c.id, name: c.taskName});
+  });
+  var existIds = {};
+  state.sharedTasks.forEach(function(t){ existIds[t.taskName] = true; });
+
+  var html = '<div class="select-group">';
+  html += '<div class="select-group-header"><span class="select-group-title">' + esc(tab) + ' のタスク（' + tasks.length + '件）</span>';
+  html += '<button class="select-all-btn" onclick="selectAllSharedTab()">全選択</button></div>';
+  tasks.forEach(function(t) {
+    var already = existIds[t.name];
+    var checked = state.sharedSelectedNewTasks[t.id] ? ' checked' : '';
+    var label = already ? esc(t.name) + ' <span style="color:#94a3b8;font-size:11px;">（追加済み）</span>' : esc(t.name);
+    html += '<div class="select-item">';
+    html += '<div class="select-box' + checked + '" onclick="toggleSharedSelect(\'' + t.id + '\')"></div>';
+    html += '<span class="select-label" onclick="toggleSharedSelect(\'' + t.id + '\')">' + label + '</span></div>';
+  });
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function renderSharedEventList(container) {
+  var html = '<div class="event-list">';
+  Object.keys(EVENT_MASTER).forEach(function(name) {
+    var ev = EVENT_MASTER[name];
+    var currentMonth = new Date().getMonth() + 1;
+    var isRecommended = ev.months.indexOf(currentMonth) >= 0;
+    var badge = isRecommended ? '<span style="display:block;font-size:10px;color:#d97706;margin-top:4px;">今月おすすめ</span>' : '';
+    html += '<div class="event-card" onclick="selectSharedEvent(\'' + escAttr(name) + '\')">' + esc(name) + badge + '</div>';
+  });
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function selectSharedEvent(name) {
+  state.sharedSelectedEvent = name;
+  state.sharedSelectedNewTasks = {};
+  renderSharedAddContent();
+}
+
+function renderSharedEventTasks(container) {
+  var name = state.sharedSelectedEvent;
+  var ev = EVENT_MASTER[name];
+  if (!ev) return;
+  var tasks = ev.tasks.slice();
+  state.customMaster.forEach(function(c) {
+    if (c.category === '行事' && c.subCategory === name) tasks.push({id: c.id, name: c.taskName});
+  });
+  var existIds = {};
+  state.sharedTasks.forEach(function(t){ existIds[t.taskName] = true; });
+
+  var html = '<div class="back-btn" onclick="state.sharedSelectedEvent=null;renderSharedAddContent();">← 行事一覧に戻る</div>';
+  html += '<div class="select-group">';
+  html += '<div class="select-group-header"><span class="select-group-title">' + esc(name) + ' のタスク（' + tasks.length + '件）</span>';
+  html += '<button class="select-all-btn" onclick="selectAllSharedTab()">全選択</button></div>';
+  tasks.forEach(function(t) {
+    var already = existIds[t.name];
+    var checked = state.sharedSelectedNewTasks[t.id] ? ' checked' : '';
+    var label = already ? esc(t.name) + ' <span style="color:#94a3b8;font-size:11px;">（追加済み）</span>' : esc(t.name);
+    html += '<div class="select-item">';
+    html += '<div class="select-box' + checked + '" onclick="toggleSharedSelect(\'' + t.id + '\')"></div>';
+    html += '<span class="select-label" onclick="toggleSharedSelect(\'' + t.id + '\')">' + label + '</span></div>';
+  });
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function renderSharedDutyList(container) {
+  var html = '<div class="event-list">';
+  Object.keys(DUTY_MASTER).forEach(function(name) {
+    html += '<div class="event-card" onclick="selectSharedDuty(\'' + escAttr(name) + '\')">' + esc(name) + '</div>';
+  });
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function selectSharedDuty(name) {
+  state.sharedSelectedDuty = name;
+  state.sharedSelectedNewTasks = {};
+  renderSharedAddContent();
+}
+
+function renderSharedDutyTasks(container) {
+  var name = state.sharedSelectedDuty;
+  var tasks = (DUTY_MASTER[name] || []).slice();
+  state.customMaster.forEach(function(c) {
+    if (c.category === '校務分掌' && c.subCategory === name) tasks.push({id: c.id, name: c.taskName});
+  });
+  var existIds = {};
+  state.sharedTasks.forEach(function(t){ existIds[t.taskName] = true; });
+
+  var html = '<div class="back-btn" onclick="state.sharedSelectedDuty=null;renderSharedAddContent();">← 校務分掌一覧に戻る</div>';
+  html += '<div class="select-group">';
+  html += '<div class="select-group-header"><span class="select-group-title">' + esc(name) + ' のタスク（' + tasks.length + '件）</span>';
+  html += '<button class="select-all-btn" onclick="selectAllSharedTab()">全選択</button></div>';
+  tasks.forEach(function(t) {
+    var already = existIds[t.name];
+    var checked = state.sharedSelectedNewTasks[t.id] ? ' checked' : '';
+    var label = already ? esc(t.name) + ' <span style="color:#94a3b8;font-size:11px;">（追加済み）</span>' : esc(t.name);
+    html += '<div class="select-item">';
+    html += '<div class="select-box' + checked + '" onclick="toggleSharedSelect(\'' + t.id + '\')"></div>';
+    html += '<span class="select-label" onclick="toggleSharedSelect(\'' + t.id + '\')">' + label + '</span></div>';
+  });
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function toggleSharedSelect(id) {
+  state.sharedSelectedNewTasks[id] = !state.sharedSelectedNewTasks[id];
+  renderSharedAddContent();
+}
+
+function selectAllSharedTab() {
+  var tasks = getSharedCurrentTabTasks();
+  var allSelected = tasks.every(function(t){return state.sharedSelectedNewTasks[t.id];});
+  tasks.forEach(function(t){ state.sharedSelectedNewTasks[t.id] = !allSelected; });
+  renderSharedAddContent();
+}
+
+function getSharedCurrentTabTasks() {
+  var tab = state.sharedAddTab;
+  if (tab === '行事' && state.sharedSelectedEvent) {
+    var tasks = EVENT_MASTER[state.sharedSelectedEvent].tasks.slice();
+    state.customMaster.forEach(function(c) {
+      if (c.category === '行事' && c.subCategory === state.sharedSelectedEvent) tasks.push({id:c.id,name:c.taskName});
+    });
+    return tasks;
+  }
+  if (tab === '校務分掌' && state.sharedSelectedDuty) {
+    var tasks = (DUTY_MASTER[state.sharedSelectedDuty] || []).slice();
+    state.customMaster.forEach(function(c) {
+      if (c.category === '校務分掌' && c.subCategory === state.sharedSelectedDuty) tasks.push({id:c.id,name:c.taskName});
+    });
+    return tasks;
+  }
+  var tasks = (TASK_MASTER[tab] || []).slice();
+  state.customMaster.forEach(function(c) {
+    if (c.category === tab) tasks.push({id:c.id,name:c.taskName});
+  });
+  return tasks;
+}
+
+function addSelectedToSharedTasks() {
+  var tasks = getSharedCurrentTabTasks();
+  var added = 0;
+  tasks.forEach(function(t) {
+    if (!state.sharedSelectedNewTasks[t.id]) return;
+    var exists = state.sharedTasks.some(function(s){return s.taskName === t.name;});
+    if (exists) return;
+
+    var cat = state.sharedAddTab;
+    var sub = '';
+    if (cat === '行事') sub = state.sharedSelectedEvent || '';
+    else if (cat === '校務分掌') sub = state.sharedSelectedDuty || '';
+
+    state.sharedTasks.push({
+      id: 'sh_' + Date.now() + '_' + Math.random().toString(36).substr(2,4),
+      taskName: t.name,
+      category: cat,
+      subCategory: sub,
+      priority: '中',
+      deadline: '',
+      memo: '',
+      assignee: '',
+      isCompleted: false,
+      completedAt: '',
+      completedBy: '',
+      createdBy: state.userName,
+      createdAt: new Date().toISOString()
+    });
+    added++;
+  });
+
+  if (added > 0) {
+    state.hasUnsavedChanges = true;
+    updateSaveButton();
+    scheduleAutoSave();
+    showToast(added + '件の共有タスクを追加しました');
+    state.sharedSelectedNewTasks = {};
+    renderSharedAddContent();
+  } else {
+    showToast('新しいタスクがありません');
+  }
+}
+
+// ============================================================
+// 設定画面
+// ============================================================
+function setFontSize(size) {
+  document.body.classList.remove('font-s','font-m','font-l');
+  document.body.classList.add('font-' + size);
+  localStorage.setItem('taskapp_fontSize', size);
+  updateFontSizeButtons(size);
+}
+
+function updateFontSizeButtons(size) {
+  document.querySelectorAll('.font-size-btn').forEach(function(btn) {
+    if (btn.dataset.size === size) {
+      btn.className = 'btn btn-primary font-size-btn';
+    } else {
+      btn.className = 'btn btn-outline font-size-btn';
+    }
+  });
+}
+
+function initFontSize() {
+  var size = localStorage.getItem('taskapp_fontSize') || 'm';
+  document.body.classList.remove('font-s','font-m','font-l');
+  document.body.classList.add('font-' + size);
+}
+
+function savePassword() {
+  var pin = getPinValue('numpadSettings');
+  if (pin.length !== 4) { showToast('4桁のパスコードを入力してください'); return; }
+
+  google.script.run
+    .withSuccessHandler(function() {
+      state.hasPassword = true;
+      showToast('パスコードを変更しました');
+      resetPin('numpadSettings', 'pinDisplaySettings');
+    })
+    .withFailureHandler(function(e) { showToast('エラー: ' + e.message); })
+    .setPassword(state.userId, pin);
+}
+
+function renderSettings() {
+  // パスコード変更用のテンキー初期化
+  initNumpad('numpadSettings', 'pinDisplaySettings');
+
+  // 文字サイズボタンの状態を更新
+  var currentSize = localStorage.getItem('taskapp_fontSize') || 'm';
+  updateFontSizeButtons(currentSize);
+
+  var list = document.getElementById('customMasterList');
+  if (state.customMaster.length === 0) {
+    list.innerHTML = '<p style="font-size:12px;color:#94a3b8;padding:8px 0;">カスタムタスクはまだありません</p>';
+    return;
+  }
+  var html = '';
+  state.customMaster.forEach(function(c) {
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f1f5f9;">';
+    html += '<div><span style="font-size:13px;">' + esc(c.taskName) + '</span>';
+    html += '<span style="font-size:10px;color:#94a3b8;margin-left:8px;">' + esc(c.category) + (c.subCategory ? ' / ' + esc(c.subCategory) : '') + '</span></div>';
+    html += '<button style="color:#dc2626;font-size:11px;background:none;" onclick="deleteCustom(\'' + c.id + '\')">削除</button>';
+    html += '</div>';
+  });
+  list.innerHTML = html;
+}
+
+function changeName() {
+  var newName = document.getElementById('settingsName').value.trim();
+  if (!newName) { showToast('名前を入力してください'); return; }
+
+  google.script.run
+    .withSuccessHandler(function() {
+      state.userName = newName;
+      document.getElementById('headerUserName').textContent = newName + ' 先生';
+      showToast('名前を変更しました');
+    })
+    .withFailureHandler(function(e){ showToast('エラー: ' + e.message); })
+    .updateUserName(state.userId, newName);
+}
+
+function showCustomMasterModal() {
+  document.getElementById('cmTaskName').value = '';
+  document.getElementById('cmSubCategory').value = '';
+  document.getElementById('customMasterModal').classList.add('show');
+}
+
+function addCustomMaster() {
+  var name = document.getElementById('cmTaskName').value.trim();
+  if (!name) { showToast('タスク名を入力してください'); return; }
+
+  var task = {
+    id: 'cm_' + Date.now() + '_' + Math.random().toString(36).substr(2,4),
+    taskName: name,
+    category: document.getElementById('cmCategory').value,
+    subCategory: document.getElementById('cmSubCategory').value,
+    createdBy: state.userName
+  };
+
+  google.script.run
+    .withSuccessHandler(function() {
+      state.customMaster.push(task);
+      closeModal('customMasterModal');
+      renderSettings();
+      showToast('カスタムタスクを追加しました');
+    })
+    .withFailureHandler(function(e){ showToast('エラー: ' + e.message); })
+    .addCustomMasterTask(JSON.stringify(task));
+}
+
+function deleteCustom(id) {
+  if (!confirm('このカスタムタスクを削除しますか？')) return;
+  google.script.run
+    .withSuccessHandler(function() {
+      state.customMaster = state.customMaster.filter(function(c){return c.id !== id;});
+      renderSettings();
+      showToast('削除しました');
+    })
+    .withFailureHandler(function(e){ showToast('エラー: ' + e.message); })
+    .deleteCustomMasterTask(id);
+}
+
+function resetMyTasksAction() {
+  if (!confirm('マイタスクを全てリセットしますか？この操作は取り消せません。')) return;
+  google.script.run
+    .withSuccessHandler(function() {
+      state.myTasks = [];
+      state.hasUnsavedChanges = false;
+      updateSaveButton();
+      renderMyTasks();
+      showToast('マイタスクをリセットしました');
+    })
+    .withFailureHandler(function(e){ showToast('エラー: ' + e.message); })
+    .resetMyTasks(state.userId);
+}
+
+function runSaveTest() {
+  var box = document.getElementById('debugResult');
+  box.style.display = 'block';
+  box.textContent = '保存テスト中...';
+  google.script.run
+    .withSuccessHandler(function(json) {
+      var info = JSON.parse(json);
+      var lines = [];
+      if (info.success && info.written) {
+        lines.push('✅ 保存テスト成功！');
+        lines.push('スプレッドシートへの書き込みと読み取りが正常です。');
+        lines.push('シート名: ' + info.sheetName);
+        lines.push('userId: ' + info.userId);
+      } else if (info.success && !info.written) {
+        lines.push('⚠ 書き込みはできたが読み返せませんでした');
+      } else {
+        lines.push('❌ 保存テスト失敗: ' + (info.error || '不明'));
+      }
+      box.textContent = lines.join('\n');
+    })
+    .withFailureHandler(function(e) {
+      box.textContent = '❌ サーバーエラー: ' + (e && e.message ? e.message : '不明');
+    })
+    .debugSaveTest(state.userId);
+}
+
+function forceManualSave() {
+  var box = document.getElementById('debugResult');
+  box.style.display = 'block';
+  box.textContent = '強制保存中... (マイタスク' + state.myTasks.length + '件, userId=' + state.userId + ')';
+  google.script.run
+    .withSuccessHandler(function(result) {
+      var msg = '✅ 保存完了！';
+      if (result && result.saved !== undefined) {
+        msg += ' (' + result.saved + '件保存)';
+      }
+      box.textContent = msg + '\nスプレッドシートを確認してください。';
+      state.hasUnsavedChanges = false;
+      updateSaveButton();
+    })
+    .withFailureHandler(function(e) {
+      box.textContent = '❌ 保存エラー: ' + (e && e.message ? e.message : '不明');
+    })
+    .saveMyTasks(state.userId, JSON.stringify(state.myTasks));
+}
+
+function runDebugCheck() {
+  var box = document.getElementById('debugResult');
+  box.style.display = 'block';
+  box.textContent = '確認中...';
+  google.script.run
+    .withSuccessHandler(function(json) {
+      var info = JSON.parse(json);
+      if (info.error) {
+        box.textContent = 'サーバーエラー: ' + info.error;
+        return;
+      }
+      var lines = [];
+      lines.push('あなたのユーザーID: ' + info.searchId);
+      lines.push('スプレッドシートのタスク行数: ' + info.totalRows);
+      lines.push('あなたのタスク数: ' + info.matchedRows);
+      if (info.sampleUserIds && info.sampleUserIds.length > 0) {
+        lines.push('--- スプレッドシートの先頭データ ---');
+        info.sampleUserIds.forEach(function(s, idx) {
+          lines.push((idx+1) + ') ID=' + s.raw + ' 一致=' + (s.match ? 'はい' : 'いいえ'));
+        });
+      }
+      if (info.matchedRows === 0 && info.totalRows > 0) {
+        lines.push('');
+        lines.push('⚠ タスクはあるのに一致しません。');
+        lines.push('別の端末で「この端末だけで使う」を選んでいませんか？');
+        lines.push('「🔑 別の端末で登録済みの方はこちら」から名前とパスコードでログインしてください。');
+      }
+      box.textContent = lines.join('\n');
+    })
+    .withFailureHandler(function(e) {
+      box.textContent = 'エラー: ' + (e && e.message ? e.message : '不明');
+    })
+    .debugLoadInfo(state.userId);
+}
+
+function resetSharedTasksAction() {
+  if (!confirm('共有タスクを全てリセットしますか？全員に影響します。')) return;
+  google.script.run
+    .withSuccessHandler(function() {
+      state.sharedTasks = [];
+      state.hasUnsavedChanges = false;
+      updateSaveButton();
+      renderSharedTasks();
+      showToast('共有タスクをリセットしました');
+    })
+    .withFailureHandler(function(e){ showToast('エラー: ' + e.message); })
+    .resetSharedTasks();
+}
+
+// ============================================================
+// おすすめタスク
+// ============================================================
+function showRecommendations() {
+  var month = new Date().getMonth() + 1;
+  var cats = MONTH_RECOMMEND[month] || [];
+
+  // 今月の行事もおすすめに追加
+  var eventNames = [];
+  Object.keys(EVENT_MASTER).forEach(function(name) {
+    if (EVENT_MASTER[name].months.indexOf(month) >= 0) eventNames.push(name);
+  });
+
+  if (cats.length === 0 && eventNames.length === 0) return;
+
+  var banner = document.getElementById('recommendBanner');
+  var tags = document.getElementById('recommendTags');
+  var html = '';
+
+  cats.forEach(function(cat) {
+    html += '<span class="recommend-tag" onclick="switchScreen(\'addtask\');selectAddTab(\'' + escAttr(cat) + '\')">' + esc(cat) + '</span>';
+  });
+  eventNames.forEach(function(name) {
+    html += '<span class="recommend-tag" onclick="switchScreen(\'addtask\');selectAddTab(\'行事\');selectEvent(\'' + escAttr(name) + '\')">' + esc(name) + '</span>';
+  });
+
+  tags.innerHTML = html;
+  banner.style.display = 'block';
+}
+
+// ============================================================
+// 保存機能
+// ============================================================
+function updateSaveButton() {
+  var btn = document.getElementById('saveFloat');
+  var showing = state.hasUnsavedChanges;
+  btn.classList.toggle('show', showing);
+  document.getElementById('app').style.paddingTop = showing ? '38px' : '0';
+}
+
+// 自動保存：タスク追加・変更のたびに呼ばれる
+var autoSaveTimer = null;
+function scheduleAutoSave() {
+  if (autoSaveTimer) clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(function() {
+    if (state.hasUnsavedChanges) {
+      console.log('autoSave triggered');
+      saveAll();
+    }
+  }, 1500);
+}
+
+function saveAll() {
+  var btn = document.getElementById('saveFloat');
+  btn.textContent = '保存中... (マイタスク' + state.myTasks.length + '件)';
+  btn.classList.add('saving');
+  btn.style.cursor = 'default';
+  console.log('saveAll: userId=' + state.userId + ', myTasks=' + state.myTasks.length + ', sharedTasks=' + state.sharedTasks.length);
+
+  var saved = 0;
+  var total = 2;
+  function checkDone() {
+    saved++;
+    if (saved >= total) {
+      state.hasUnsavedChanges = false;
+      btn.textContent = '⚠ 未保存の変更があります ― タップして保存';
+      btn.classList.remove('saving');
+      btn.style.cursor = 'pointer';
+      updateSaveButton();
+      showToast('保存しました');
+    }
+  }
+
+  google.script.run
+    .withSuccessHandler(function(result) {
+      if (result && result.saved !== undefined) {
+        console.log('マイタスク保存成功: ' + result.saved + '件');
+      }
+      checkDone();
+    })
+    .withFailureHandler(function(e){
+      var msg = e && e.message ? e.message : '不明なエラー';
+      showToast('マイタスク保存エラー: ' + msg);
+      console.error('saveMyTasks error:', msg);
+      btn.textContent = '⚠ 未保存の変更があります ― タップして保存';
+      btn.classList.remove('saving');
+    })
+    .saveMyTasks(state.userId, JSON.stringify(state.myTasks));
+
+  google.script.run
+    .withSuccessHandler(checkDone)
+    .withFailureHandler(function(e){ showToast('保存エラー: ' + e.message); btn.textContent='⚠ 未保存の変更があります ― タップして保存'; btn.classList.remove('saving'); })
+    .saveSharedTasks(JSON.stringify(state.sharedTasks));
+}
+
+// ============================================================
+// ユーティリティ
+// ============================================================
+function closeModal(id) {
+  document.getElementById(id).classList.remove('show');
+}
+
+function showToast(msg) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(function(){ t.classList.remove('show'); }, 2500);
+}
+
+function esc(str) {
+  if (!str) return '';
+  var d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+// onclick属性内で安全に使えるエスケープ（シングルクォート対応）
+function escAttr(str) {
+  if (!str) return '';
+  return str.replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;');
+}
+
+// 閉じる前の警告
+window.addEventListener('beforeunload', function(e) {
+  if (state.hasUnsavedChanges) {
+    e.preventDefault();
+    e.returnValue = '保存されていない変更があります。ページを離れますか？';
+  }
+});
+
+// 起動
+initApp();
+</script>
+<script>
+try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(function(){});}catch(e){}
+if('serviceWorker' in navigator && location.protocol==='https:'){try{navigator.serviceWorker.register('sw.js').catch(function(){});}catch(e){}}
+</script>
+</body>
+</html>
